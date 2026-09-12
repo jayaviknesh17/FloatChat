@@ -226,16 +226,98 @@ Every response explicitly tracks:
 
 ---
 
-## 12. Running Unit Tests & Demonstrations
+## 12. Frontend Integration & Visualization Data Layer (Milestone 5)
 
-### Complete Test Suite
+Milestone 5 provides high-performance endpoints specifically formatted for frontend integration (React, Next.js, and React Three Fiber 3D/4D visualizations).
+
+### 1. 3D/4D Trajectory Endpoint (`GET /api/v1/visualization/trajectory`)
+Feeds 3D particle positions and time-series paths into React Three Fiber (R3F).
+
+- **Query Parameters**:
+  - `region`: `"bay_of_bengal"` or `"arabian_sea"`
+  - `start_date`: ISO date string (e.g. `"2021-01-01"`) for time-slice filtering
+  - `end_date`: ISO date string (e.g. `"2021-12-31"`) for time-slice filtering
+  - `float_id`: Filter by specific ARGO float platform number
+  - `variable`: `"temperature"`, `"salinity"`, or `"both"`
+  - `limit`: Maximum trajectory points to return (default: `5000`, max: `20000`)
+
+- **Canonical `TrajectoryPoint` Payload**:
+  ```json
+  {
+    "float_id": "2901286",
+    "cycle_number": 1,
+    "timestamp": "2010-11-02T16:22:30",
+    "latitude": 8.108,
+    "longitude": 89.037,
+    "pressure_dbar": 4.1,
+    "depth_m": 4.08,
+    "temperature_c": 28.89,
+    "salinity_psu": 33.772
+  }
+  ```
+
+### 2. Fast Float Summary Endpoint (`GET /api/v1/visualization/floats`)
+Optimized lightweight endpoint for map markers, float selection menus, and region dropdowns. Returns summary bounds for all ingested ARGO floats in **~1.0 ms** via indexed summary tables.
+
+- **Sample `FloatSummaryItem` Payload**:
+  ```json
+  {
+    "float_id": "2900263",
+    "region": "Arabian Sea",
+    "first_observation": "2003-06-16T07:28:26",
+    "last_observation": "2004-05-16T02:20:51",
+    "observation_count": 2922,
+    "profile_count": 54,
+    "latest_latitude": 6.625,
+    "latest_longitude": 73.073
+  }
+  ```
+
+### 3. Frontend Integration Contract for Person 2 (Harini)
+
+1. **Natural Language Query UI**:
+   - Call `POST /api/v1/nl-query/execute` with `{ "query": "..." }`.
+   - Use `results` to render observation cards/tables.
+   - Use `float_count`, `date_range`, `geographic_bounds`, and `variables` to display query transparency cards.
+   - If `anomaly_summary` is non-null, display `anomaly_percentage` and highlight observations where `is_anomaly === true` using `z_score`.
+
+2. **React Three Fiber (R3F) 3D Scene**:
+   - Call `GET /api/v1/visualization/trajectory?region=bay_of_bengal` to fetch 3D coordinates.
+   - Map `longitude` $\to X$, `latitude` $\to Y$, `-depth_m` $\to Z$.
+   - Animate particles over `timestamp` for 4D time playback.
+
+3. **Float Selector & Map Overlays**:
+   - Call `GET /api/v1/visualization/floats` on initial app load.
+   - Render float markers using `latest_latitude` and `latest_longitude`.
+
+4. **Depth Profile Charts**:
+   - Call `GET /api/v1/profile/{float_id}/analysis`.
+   - Chart `temperature_profile` (`temperature_c` vs `depth_m`) and `salinity_profile` (`salinity_psu` vs `depth_m`).
+   - Draw horizontal reference lines for `thermocline.estimated_thermocline_depth_m` and `salinity_gradient.estimated_halocline_depth_m`.
+
+---
+
+## 13. Performance Benchmarks (Real 3.4M-Row SQLite Database)
+
+| Endpoint | SQLite DB Latency | Total API Latency | Description |
+|---|---|---|---|
+| `GET /api/v1/visualization/floats` | **1.078 ms** | **1.086 ms** | Fast float summary metadata list |
+| `GET /api/v1/visualization/trajectory` | **3.577 ms** | **6.138 ms** | Time-sliced 3D/4D trajectory points |
+| `POST /api/v1/nl-query/execute` | **5.482 ms** | **35.159 ms** | Parameterized NL execution + z-scores |
+| `GET /api/v1/profile/{float_id}/analysis` | **4.451 ms** | **15.729 ms** | Scientific profile, thermocline & halocline |
+
+---
+
+## 14. Running Unit Tests & Demonstrations
+
+### Complete Pytest Suite
 ```bash
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-### Milestone 4 Demonstration Script
+### Milestone 5 Verification Script
 ```bash
-.venv\Scripts\python scripts/demo_milestone4.py
+.venv\Scripts\python scripts/demo_milestone5.py
 ```
 
 ### Running FastAPI Server
@@ -244,4 +326,5 @@ Every response explicitly tracks:
 ```
 
 Access Interactive API documentation at [http://localhost:8000/docs](http://localhost:8000/docs).
+
 

@@ -198,6 +198,10 @@ class NLExecutionResponse(BaseModel):
     status: str = Field(..., description="Status: 'success', 'clarification_needed', or 'error'")
     interpreted_query: Optional[Dict[str, Any]] = Field(None, description="Validated QueryRequest dictionary if status is 'success'")
     count: int = Field(0, description="Number of matching observation records returned")
+    float_count: int = Field(0, description="Number of unique float platform numbers returned")
+    date_range: Dict[str, Optional[str]] = Field(default_factory=dict, description="Temporal range of results {start, end}")
+    geographic_bounds: Dict[str, Optional[float]] = Field(default_factory=dict, description="Spatial bounding box {lat_min, lat_max, lon_min, lon_max}")
+    variables: List[str] = Field(default_factory=list, description="Variables included in results")
     results: List[Dict[str, Any]] = Field(default_factory=list, description="Matching observation records")
     anomaly_summary: Optional[Dict[str, Any]] = Field(None, description="Summary of statistical anomaly detection if performed")
     provenance: ProvenanceInfo = Field(..., description="Data provenance metadata")
@@ -205,6 +209,7 @@ class NLExecutionResponse(BaseModel):
     total_latency_ms: float = Field(..., description="Total endpoint execution latency in ms")
     clarification: Optional[str] = Field(None, description="Clarification request prompt if query was ambiguous")
     confidence: float = Field(1.0, description="NL parsing confidence score")
+
 
 
 class TemperatureProfilePoint(BaseModel):

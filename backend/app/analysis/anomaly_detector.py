@@ -135,13 +135,22 @@ def detect_anomalies(
         rec_copy["month"] = month
         enriched_records.append(rec_copy)
 
+    max_abs_z = 0.0
+    for r in enriched_records:
+        z = r.get("z_score")
+        if z is not None and isinstance(z, (int, float)):
+            if abs(z) > max_abs_z:
+                max_abs_z = round(abs(z), 3)
+
     summary = {
         "variable_analyzed": variable,
         "total_observations_analyzed": total_valid_count,
         "anomalous_observations_count": anomaly_count,
         "anomaly_percentage": round((anomaly_count / total_valid_count * 100), 2) if total_valid_count > 0 else 0.0,
         "z_score_threshold": 2.0,
+        "max_abs_z_score": max_abs_z,
         "baseline_grouping": "region + month + depth_band (0-50m, 50-200m, 200-500m, 500-1000m, >1000m)"
     }
 
     return enriched_records, summary
+

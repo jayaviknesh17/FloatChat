@@ -19,9 +19,17 @@ from backend.app.models.query_schema import (
     ProfileAnalysisResponse,
     TemperatureProfilePoint,
     SalinityProfilePoint,
+    REGION_MAPPING,
 )
 from backend.app.models.provenance import ProvenanceInfo
+from backend.app.models.visualization_schema import (
+    TrajectoryPoint,
+    TrajectoryResponse,
+    FloatSummaryItem,
+    FloatSummaryResponse,
+)
 from backend.app.analysis.anomaly_detector import detect_anomalies
+
 from backend.app.analysis.thermocline import detect_thermocline
 from backend.app.analysis.salinity_gradient import detect_salinity_gradient
 from backend.app.utils.logging import get_logger
@@ -270,7 +278,7 @@ class QueryService:
 
     def get_floats_metadata(self) -> Tuple[FloatListResponse, float, float]:
         """
-        Retrieve summary list of all available ARGO floats using fast indexed lookups.
+        Retrieve summary list of all available ARGO floats using fast indexed/summary table lookups.
 
         Returns:
             Tuple of (FloatListResponse, db_latency_ms, total_latency_ms)
@@ -278,47 +286,59 @@ class QueryService:
         start_total = time.perf_counter()
 
         db_start = time.perf_counter()
+        floats_list = []
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT 
-                    float_id,
-                    GROUP_CONCAT(DISTINCT region) as regions_str,
-                    COUNT(DISTINCT cycle_number) as profile_count,
-                    MIN(profile_time) as min_date,
-                    MAX(profile_time) as max_date
-                FROM argo_observations
-                GROUP BY float_id
-                ORDER BY float_id ASC
-            """)
-            summary_rows = cursor.fetchall()
-
-            floats_list = []
-            for s in summary_rows:
-                fid = s["float_id"]
-                regions = [r.strip() for r in (s["regions_str"] or "").split(",") if r.strip()]
-
-                # Fast indexed lookup for latest profile location (< 0.1 ms per float)
+            # Check if summary table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='argo_float_summary'")
+            if cursor.fetchone() is not None:
+                cursor.execute("SELECT * FROM argo_float_summary ORDER BY float_id ASC")
+                for s in cursor.fetchall():
+                    regions = [r.strip() for r in (s["region"] or "").split(",") if r.strip()]
+                    floats_list.append(FloatMetadata(
+                        float_id=s["float_id"],
+                        regions=regions,
+                        profile_count=s["profile_count"],
+                        min_date=s["first_observation"],
+                        max_date=s["last_observation"],
+                        latest_latitude=s["latest_latitude"],
+                        latest_longitude=s["latest_longitude"],
+                        latest_profile_time=s["last_observation"]
+                    ))
+            else:
                 cursor.execute("""
-                    SELECT latitude, longitude, profile_time
+                    SELECT 
+                        float_id,
+                        GROUP_CONCAT(DISTINCT region) as regions_str,
+                        COUNT(DISTINCT cycle_number) as profile_count,
+                        MIN(profile_time) as min_date,
+                        MAX(profile_time) as max_date
                     FROM argo_observations
-                    WHERE float_id = ?
-                    ORDER BY profile_time DESC
-                    LIMIT 1
-                """, (fid,))
-                loc = cursor.fetchone()
-
-                floats_list.append(FloatMetadata(
-                    float_id=fid,
-                    regions=regions,
-                    profile_count=s["profile_count"],
-                    min_date=s["min_date"],
-                    max_date=s["max_date"],
-                    latest_latitude=loc["latitude"] if loc else 0.0,
-                    latest_longitude=loc["longitude"] if loc else 0.0,
-                    latest_profile_time=loc["profile_time"] if loc else None
-                ))
-
+                    GROUP BY float_id
+                    ORDER BY float_id ASC
+                """)
+                summary_rows = cursor.fetchall()
+                for s in summary_rows:
+                    fid = s["float_id"]
+                    regions = [r.strip() for r in (s["regions_str"] or "").split(",") if r.strip()]
+                    cursor.execute("""
+                        SELECT latitude, longitude, profile_time
+                        FROM argo_observations
+                        WHERE float_id = ?
+                        ORDER BY profile_time DESC
+                        LIMIT 1
+                    """, (fid,))
+                    loc = cursor.fetchone()
+                    floats_list.append(FloatMetadata(
+                        float_id=fid,
+                        regions=regions,
+                        profile_count=s["profile_count"],
+                        min_date=s["min_date"],
+                        max_date=s["max_date"],
+                        latest_latitude=loc["latitude"] if loc else 0.0,
+                        latest_longitude=loc["longitude"] if loc else 0.0,
+                        latest_profile_time=loc["profile_time"] if loc else None
+                    ))
             db_end = time.perf_counter()
 
         end_total = time.perf_counter()
@@ -332,6 +352,7 @@ class QueryService:
             latency_ms=total_latency_ms
         )
         return resp, db_latency_ms, total_latency_ms
+
 
     def _build_provenance(
         self,
@@ -421,6 +442,24 @@ class QueryService:
             target_var = req.variable if req.variable in ["temperature", "salinity"] else "temperature"
             enriched_results, anomaly_summary = detect_anomalies(query_resp.results, variable=target_var)
 
+        # Compute convenience frontend metadata
+        float_ids_set = {str(r["float_id"]) for r in enriched_results if r.get("float_id")}
+        times = [r["profile_time"] for r in enriched_results if r.get("profile_time")]
+        lats = [r["latitude"] for r in enriched_results if r.get("latitude") is not None]
+        lons = [r["longitude"] for r in enriched_results if r.get("longitude") is not None]
+
+        date_range = {
+            "start": min(times) if times else None,
+            "end": max(times) if times else None
+        }
+        geographic_bounds = {
+            "lat_min": min(lats) if lats else None,
+            "lat_max": max(lats) if lats else None,
+            "lon_min": min(lons) if lons else None,
+            "lon_max": max(lons) if lons else None
+        }
+        vars_list = ["temperature"] if req.variable == "temperature" else (["salinity"] if req.variable == "salinity" else ["temperature", "salinity"])
+
         provenance = self._build_provenance(
             results=enriched_results,
             region=req.region,
@@ -435,6 +474,10 @@ class QueryService:
             status="success",
             interpreted_query=parsed.interpreted_query,
             count=len(enriched_results),
+            float_count=len(float_ids_set),
+            date_range=date_range,
+            geographic_bounds=geographic_bounds,
+            variables=vars_list,
             results=enriched_results,
             anomaly_summary=anomaly_summary,
             provenance=provenance,
@@ -443,6 +486,7 @@ class QueryService:
             clarification=None,
             confidence=parsed.confidence
         )
+
 
     def get_profile_analysis(
         self,
@@ -525,4 +569,218 @@ class QueryService:
         )
 
         return analysis_resp, db_lat, total_lat
+
+    def get_trajectory_data(
+        self,
+        region: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        float_id: Optional[str] = None,
+        variable: Optional[str] = None,
+        limit: int = 5000
+    ) -> Tuple[TrajectoryResponse, float, float]:
+        """
+        Retrieve 3D/4D trajectory points for React Three Fiber rendering.
+        """
+        start_total = time.perf_counter()
+        safe_limit = max(1, min(limit or 5000, 20000))
+
+        conditions = []
+        params = []
+
+        clean_region = None
+        if region:
+            r_clean = region.strip().lower()
+            clean_region = REGION_MAPPING.get(r_clean, region.strip())
+            conditions.append("region = ?")
+            params.append(clean_region)
+
+        if start_date:
+            conditions.append("profile_time >= ?")
+            params.append(start_date)
+
+        if end_date:
+            conditions.append("profile_time <= ?")
+            end_val = end_date if len(end_date) > 10 else f"{end_date}T23:59:59"
+            params.append(end_val)
+
+        if float_id:
+            conditions.append("float_id = ?")
+            params.append(float_id.strip())
+
+        if variable == "temperature":
+            conditions.append("temperature_c IS NOT NULL")
+        elif variable == "salinity":
+            conditions.append("salinity_psu IS NOT NULL")
+
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+        sql = f"""
+            SELECT float_id, cycle_number, profile_time, latitude, longitude,
+                   pressure_dbar, depth_m, temperature_c, salinity_psu
+            FROM argo_observations
+            {where_clause}
+            ORDER BY profile_time ASC, float_id ASC, cycle_number ASC, depth_m ASC
+            LIMIT ?
+        """
+        params.append(safe_limit)
+
+        db_start = time.perf_counter()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            db_end = time.perf_counter()
+
+        db_latency_ms = round((db_end - db_start) * 1000, 3)
+
+        points = []
+        float_ids_set = set()
+        lats, lons, times = [], [], []
+
+        for r in rows:
+            fid = str(r["float_id"])
+            float_ids_set.add(fid)
+            t_str = str(r["profile_time"])
+            times.append(t_str)
+            lats.append(r["latitude"])
+            lons.append(r["longitude"])
+
+            points.append(TrajectoryPoint(
+                float_id=fid,
+                cycle_number=int(r["cycle_number"]),
+                timestamp=t_str,
+                latitude=float(r["latitude"]),
+                longitude=float(r["longitude"]),
+                pressure_dbar=float(r["pressure_dbar"]),
+                depth_m=float(r["depth_m"]),
+                temperature_c=r["temperature_c"],
+                salinity_psu=r["salinity_psu"]
+            ))
+
+        point_count = len(points)
+        float_count = len(float_ids_set)
+        date_range = {
+            "start": min(times) if times else None,
+            "end": max(times) if times else None
+        }
+        geographic_bounds = {
+            "lat_min": min(lats) if lats else None,
+            "lat_max": max(lats) if lats else None,
+            "lon_min": min(lons) if lons else None,
+            "lon_max": max(lons) if lons else None
+        }
+        vars_list = ["temperature"] if variable == "temperature" else (["salinity"] if variable == "salinity" else ["temperature", "salinity"])
+
+        provenance = ProvenanceInfo(
+            data_source="Real ARGO GDAC Core Profiles",
+            source_type="Real ARGO NetCDF (*.nc / *_prof.nc) via SQLite",
+            float_ids=sorted(list(float_ids_set))[:10],
+            cycle_numbers=[],
+            variables=vars_list,
+            region=clean_region or "Bay of Bengal / Arabian Sea",
+            date_range=date_range,
+            processing_qc_notes="Trajectory data points extracted from real ARGO observations for 3D/4D particle animation."
+        )
+
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        resp = TrajectoryResponse(
+            region=clean_region,
+            point_count=point_count,
+            float_count=float_count,
+            date_range=date_range,
+            geographic_bounds=geographic_bounds,
+            variables=vars_list,
+            points=points,
+            provenance=provenance,
+            sqlite_db_latency_ms=db_latency_ms,
+            total_latency_ms=total_latency_ms
+        )
+        return resp, db_latency_ms, total_latency_ms
+
+    def get_visualization_floats(self, region: Optional[str] = None) -> Tuple[FloatSummaryResponse, float, float]:
+        """
+        Retrieve lightweight float summary objects for frontend dropdowns and map overlays.
+        """
+        start_total = time.perf_counter()
+        clean_region = None
+        if region:
+            r_clean = region.strip().lower()
+            clean_region = REGION_MAPPING.get(r_clean, region.strip())
+
+        db_start = time.perf_counter()
+        floats_list = []
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Check if summary table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='argo_float_summary'")
+            summary_table_exists = cursor.fetchone() is not None
+
+            if summary_table_exists:
+                if clean_region:
+                    cursor.execute("SELECT * FROM argo_float_summary WHERE region LIKE ? ORDER BY float_id ASC", (f"%{clean_region}%",))
+                else:
+                    cursor.execute("SELECT * FROM argo_float_summary ORDER BY float_id ASC")
+                rows = cursor.fetchall()
+                for r in rows:
+                    floats_list.append(FloatSummaryItem(
+                        float_id=r["float_id"],
+                        region=r["region"],
+                        first_observation=r["first_observation"],
+                        last_observation=r["last_observation"],
+                        observation_count=r["observation_count"],
+                        profile_count=r["profile_count"],
+                        latest_latitude=r["latest_latitude"],
+                        latest_longitude=r["latest_longitude"]
+                    ))
+            else:
+                sql = "SELECT float_id, GROUP_CONCAT(DISTINCT region) as region, COUNT(*) as observation_count, COUNT(DISTINCT cycle_number) as profile_count, MIN(profile_time) as first_observation, MAX(profile_time) as last_observation FROM argo_observations"
+                params = []
+                if clean_region:
+                    sql += " WHERE region = ?"
+                    params.append(clean_region)
+                sql += " GROUP BY float_id ORDER BY float_id ASC"
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+                for r in rows:
+                    fid = r["float_id"]
+                    cursor.execute("SELECT latitude, longitude FROM argo_observations WHERE float_id = ? ORDER BY profile_time DESC LIMIT 1", (fid,))
+                    loc = cursor.fetchone()
+                    floats_list.append(FloatSummaryItem(
+                        float_id=fid,
+                        region=r["region"],
+                        first_observation=r["first_observation"],
+                        last_observation=r["last_observation"],
+                        observation_count=r["observation_count"],
+                        profile_count=r["profile_count"],
+                        latest_latitude=loc["latitude"] if loc else 0.0,
+                        latest_longitude=loc["longitude"] if loc else 0.0
+                    ))
+            db_end = time.perf_counter()
+
+        db_latency_ms = round((db_end - db_start) * 1000, 3)
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        provenance = ProvenanceInfo(
+            data_source="Real ARGO GDAC Core Profiles",
+            source_type="Real ARGO NetCDF (*.nc / *_prof.nc) via SQLite",
+            float_ids=[f.float_id for f in floats_list],
+            cycle_numbers=[],
+            variables=["temperature", "salinity"],
+            region=clean_region or "Bay of Bengal / Arabian Sea",
+            date_range={"start": None, "end": None},
+            processing_qc_notes="Float summary list for frontend dropdowns and map markers."
+        )
+
+        resp = FloatSummaryResponse(
+            float_count=len(floats_list),
+            floats=floats_list,
+            provenance=provenance,
+            sqlite_db_latency_ms=db_latency_ms,
+            total_latency_ms=total_latency_ms
+        )
+        return resp, db_latency_ms, total_latency_ms
+
 
