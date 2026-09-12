@@ -15,8 +15,17 @@ from backend.app.models.query_schema import (
     ProfileLevel,
     FloatMetadata,
     FloatListResponse,
+    NLExecutionResponse,
+    ProfileAnalysisResponse,
+    TemperatureProfilePoint,
+    SalinityProfilePoint,
 )
+from backend.app.models.provenance import ProvenanceInfo
+from backend.app.analysis.anomaly_detector import detect_anomalies
+from backend.app.analysis.thermocline import detect_thermocline
+from backend.app.analysis.salinity_gradient import detect_salinity_gradient
 from backend.app.utils.logging import get_logger
+
 
 logger = get_logger("query_service")
 
@@ -323,3 +332,197 @@ class QueryService:
             latency_ms=total_latency_ms
         )
         return resp, db_latency_ms, total_latency_ms
+
+    def _build_provenance(
+        self,
+        results: List[Dict[str, Any]],
+        region: Optional[str] = None,
+        variable: Optional[str] = None
+    ) -> ProvenanceInfo:
+        """Construct ProvenanceInfo metadata from observation records."""
+        float_ids = sorted(list({str(r["float_id"]) for r in results if r.get("float_id")}))
+        cycle_numbers = sorted(list({int(r["cycle_number"]) for r in results if r.get("cycle_number") is not None}))
+
+        times = [r["profile_time"] for r in results if r.get("profile_time")]
+        min_date = min(times) if times else None
+        max_date = max(times) if times else None
+
+        if variable == "temperature":
+            vars_list = ["temperature"]
+        elif variable == "salinity":
+            vars_list = ["salinity"]
+        else:
+            vars_list = ["temperature", "salinity"]
+
+        return ProvenanceInfo(
+            data_source="Real ARGO GDAC Core Profiles",
+            source_type="Real ARGO NetCDF (*.nc / *_prof.nc) via SQLite",
+            float_ids=float_ids[:10],
+            cycle_numbers=cycle_numbers[:10],
+            variables=vars_list,
+            region=region or "Bay of Bengal / Arabian Sea",
+            date_range={"start": min_date, "end": max_date},
+            processing_qc_notes="Only QC flags 1 (Good) and 2 (Probably Good) retained. Depth derived via hydrostatic approximation depth_m ~ pressure_dbar."
+        )
+
+    def execute_nl_query(self, query_text: str) -> NLExecutionResponse:
+        """
+        Parse natural language query and execute ONLY through the parameterized QueryService database layer.
+        Does NOT execute arbitrary LLM-generated SQL.
+        """
+        start_total = time.perf_counter()
+        from backend.app.services.nl_query_service import NLQueryService
+
+        nl_service = NLQueryService()
+        parsed = nl_service.parse_query(query_text)
+
+        # Handle clarification needed or parsing errors
+        if parsed.status != "success" or not parsed.interpreted_query:
+            end_total = time.perf_counter()
+            return NLExecutionResponse(
+                original_query=query_text,
+                status=parsed.status,
+                interpreted_query=parsed.interpreted_query,
+                count=0,
+                results=[],
+                anomaly_summary=None,
+                provenance=ProvenanceInfo(
+                    data_source="Real ARGO GDAC Core Profiles",
+                    source_type="Real ARGO NetCDF (*.nc / *_prof.nc) via SQLite",
+                    float_ids=[],
+                    cycle_numbers=[],
+                    variables=[],
+                    region=None,
+                    date_range={"start": None, "end": None},
+                    processing_qc_notes="Query required clarification or failed parsing before database execution."
+                ),
+                sqlite_db_latency_ms=0.0,
+                total_latency_ms=round((end_total - start_total) * 1000, 3),
+                clarification=parsed.clarification,
+                confidence=parsed.confidence
+            )
+
+        # Build validated QueryRequest
+        req = QueryRequest(**parsed.interpreted_query)
+        query_resp = self.execute_query(req)
+
+        # Perform statistical anomaly detection if requested or applicable
+        should_run_anomaly = (
+            req.analysis == "anomaly" or
+            "anomal" in query_text.lower() or
+            "deviation" in query_text.lower() or
+            "outlier" in query_text.lower()
+        )
+
+        anomaly_summary = None
+        enriched_results = query_resp.results
+
+        if should_run_anomaly and query_resp.results:
+            target_var = req.variable if req.variable in ["temperature", "salinity"] else "temperature"
+            enriched_results, anomaly_summary = detect_anomalies(query_resp.results, variable=target_var)
+
+        provenance = self._build_provenance(
+            results=enriched_results,
+            region=req.region,
+            variable=req.variable
+        )
+
+        end_total = time.perf_counter()
+        total_latency = round((end_total - start_total) * 1000, 3)
+
+        return NLExecutionResponse(
+            original_query=query_text,
+            status="success",
+            interpreted_query=parsed.interpreted_query,
+            count=len(enriched_results),
+            results=enriched_results,
+            anomaly_summary=anomaly_summary,
+            provenance=provenance,
+            sqlite_db_latency_ms=query_resp.sqlite_db_latency_ms,
+            total_latency_ms=total_latency,
+            clarification=None,
+            confidence=parsed.confidence
+        )
+
+    def get_profile_analysis(
+        self,
+        float_id: str,
+        cycle_number: Optional[int] = None,
+        date: Optional[str] = None
+    ) -> Tuple[Optional[ProfileAnalysisResponse], float, float]:
+        """
+        Retrieve profile for float and execute thermocline, halocline, and provenance analysis.
+        """
+        start_total = time.perf_counter()
+        profile_resp, db_lat, _ = self.get_profile(float_id, cycle_number, date)
+
+        if not profile_resp:
+            end_total = time.perf_counter()
+            return None, db_lat, round((end_total - start_total) * 1000, 3)
+
+        levels_dicts = [
+            {
+                "depth_m": lvl.depth_m,
+                "pressure_dbar": lvl.pressure_dbar,
+                "temperature_c": lvl.temperature_c,
+                "salinity_psu": lvl.salinity_psu,
+                "temp_qc": lvl.temp_qc,
+                "psal_qc": lvl.psal_qc
+            }
+            for lvl in profile_resp.levels
+        ]
+
+        # Scientific analyses
+        thermocline_res = detect_thermocline(levels_dicts)
+        salinity_gradient_res = detect_salinity_gradient(levels_dicts)
+
+        temp_profile = [
+            TemperatureProfilePoint(
+                depth_m=l.depth_m,
+                temperature_c=l.temperature_c,
+                temp_qc=l.temp_qc
+            )
+            for l in profile_resp.levels if l.temperature_c is not None
+        ]
+
+        sal_profile = [
+            SalinityProfilePoint(
+                depth_m=l.depth_m,
+                salinity_psu=l.salinity_psu,
+                psal_qc=l.psal_qc
+            )
+            for l in profile_resp.levels if l.salinity_psu is not None
+        ]
+
+        provenance = ProvenanceInfo(
+            data_source="Real ARGO GDAC Core Profiles",
+            source_type="Real ARGO NetCDF (*.nc / *_prof.nc) via SQLite",
+            float_ids=[profile_resp.float_id],
+            cycle_numbers=[profile_resp.cycle_number],
+            variables=["temperature", "salinity"],
+            region=profile_resp.region,
+            date_range={"start": profile_resp.profile_time, "end": profile_resp.profile_time},
+            processing_qc_notes="Only QC flags 1 & 2 retained. Thermocline detected via max |dT/dz|. Halocline detected via max |dS/dz|."
+        )
+
+        end_total = time.perf_counter()
+        total_lat = round((end_total - start_total) * 1000, 3)
+
+        analysis_resp = ProfileAnalysisResponse(
+            float_id=profile_resp.float_id,
+            cycle_number=profile_resp.cycle_number,
+            profile_time=profile_resp.profile_time,
+            latitude=profile_resp.latitude,
+            longitude=profile_resp.longitude,
+            region=profile_resp.region,
+            temperature_profile=temp_profile,
+            salinity_profile=sal_profile,
+            thermocline=thermocline_res,
+            salinity_gradient=salinity_gradient_res,
+            provenance=provenance,
+            sqlite_db_latency_ms=db_lat,
+            total_latency_ms=total_lat
+        )
+
+        return analysis_resp, db_lat, total_lat
+

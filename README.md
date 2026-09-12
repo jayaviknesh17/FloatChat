@@ -144,9 +144,16 @@ The script logs progress and outputs a summary report covering:
 
 ---
 
-## 9. Natural Language Query Engine (Milestone 3)
+---
 
-The Natural Language Query Engine (`POST /api/v1/nl-query`) translates user questions into validated structured `QueryRequest` parameters.
+## 9. Natural Language Query Engine (Milestone 3 & 4)
+
+The Natural Language Query Engine provides two endpoints:
+- `POST /api/v1/nl-query`: Translates natural language questions into validated structured `QueryRequest` parameters without executing the query.
+- `POST /api/v1/nl-query/execute`: Translates user questions into validated parameters, executes parameterized SQLite queries against the 3.4M-row ARGO database, runs statistical anomaly detection if applicable, and returns matching observation records with full data provenance.
+
+> [!IMPORTANT]
+> **Safety Guarantee**: The engine **NEVER** generates or executes arbitrary SQL code from the LLM. All execution occurs strictly through parameterized SQLite queries in `QueryService`.
 
 ### Configuration
 Set the following environment variables:
@@ -165,62 +172,76 @@ export GEMINI_API_KEY=your_gemini_api_key_here
 - **Explicit Dates**: `"from January 2020 to December 2021"`, `"in 2022"`
 - **Depth Ranges**: `"surface"` (0–10m), `"upper 500 meters"` (0–500m), `"between 100 and 1000 meters"`
 - **Float IDs & Cycles**: `"for float 2902235"`, `"cycle 10"`
-
-### Example Request (`POST /api/v1/nl-query`)
-```bash
-curl -X POST http://localhost:8000/api/v1/nl-query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Show temperature observations in the Bay of Bengal from January 2020 to December 2021 between 0 and 500 meters"}'
-```
-
-### Example Response (`200 OK`)
-```json
-{
-  "original_query": "Show temperature observations in the Bay of Bengal from January 2020 to December 2021 between 0 and 500 meters",
-  "status": "success",
-  "interpreted_query": {
-    "region": "Bay of Bengal",
-    "variable": "temperature",
-    "start_date": "2020-01-01",
-    "end_date": "2021-12-31",
-    "depth_min": 0.0,
-    "depth_max": 500.0,
-    "float_id": null,
-    "cycle_number": null,
-    "analysis": "observations",
-    "limit": 1000
-  },
-  "filters_applied": [
-    "region",
-    "variable",
-    "start_date",
-    "end_date",
-    "depth_max"
-  ],
-  "clarification": null,
-  "confidence": 0.95
-}
-```
-
-### Ambiguity & Fallback Behavior
-The engine **NEVER** fabricates missing scientific filters. Vague or out-of-scope queries (e.g. `"Show ocean data"`, `"Pacific Ocean"`) return `status: "clarification_needed"` with an explanation requesting necessary scientific parameters.
+- **Anomaly Detection**: `"anomalies"`, `"deviations"`, `"outliers"`
 
 ---
 
-## 10. Running Unit Tests
+## 10. Ocean Science Analysis Engine (Milestone 4)
 
-To run the complete unit and integration test suite:
+### 1. Statistical Anomaly Detection
+- **Baseline Grouping**: Observations are grouped by `(region, month_of_year, depth_band)`.
+- **Depth Bands**:
+  - `0–50m`
+  - `50–200m`
+  - `200–500m`
+  - `500–1000m`
+  - `>1000m`
+- **Z-Score Formula**:
+  $$z = \frac{x - \mu}{\sigma}$$
+- **Threshold**: Observations with $|z| > 2.0$ are flagged as anomalous (`is_anomaly: true`).
+- **Zero-Std Safety**: Groups with $\sigma \le 10^{-6}$ safely yield $z = 0.0$ and `is_anomaly: false`.
 
+### 2. Thermocline Analysis
+- Profile levels sorted ascending by depth.
+- Finite-difference temperature gradient:
+  $$\frac{dT}{dz} = \frac{T_{i+1} - T_i}{z_{i+1} - z_i}$$
+- Thermocline depth estimated at maximum magnitude $\max |dT/dz|$.
+
+### 3. Salinity Gradient / Halocline Analysis
+- Profile levels sorted ascending by depth.
+- Finite-difference salinity gradient:
+  $$\frac{dS}{dz} = \frac{S_{i+1} - S_i}{z_{i+1} - z_i}$$
+- Halocline depth estimated at maximum magnitude $\max |dS/dz|$.
+
+### 4. Profile Analysis Endpoint (`GET /api/v1/profile/{float_id}/analysis`)
+Returns depth-sorted temperature profile, salinity profile, estimated thermocline, estimated halocline, data provenance metadata, and latency benchmarks.
+
+---
+
+## 11. Data Provenance & Latency Tracking
+
+All science and execution responses include explicit **Data Provenance** metadata:
+- `data_source`: `"Real ARGO GDAC Core Profiles"`
+- `source_type`: `"Real ARGO NetCDF (*.nc / *_prof.nc) via SQLite"`
+- `float_ids`: List of float platform numbers included
+- `cycle_numbers`: List of cycle numbers included
+- `variables`: List of target variables
+- `region`: Geographic region scope
+- `date_range`: Start and end observation timestamps
+- `processing_qc_notes`: Documented QC filters (flags 1 & 2) and depth conversion notes
+
+Every response explicitly tracks:
+- `sqlite_db_latency_ms`: Internal SQLite indexed execution time
+- `total_latency_ms`: Total API processing latency
+
+---
+
+## 12. Running Unit Tests & Demonstrations
+
+### Complete Test Suite
 ```bash
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
----
+### Milestone 4 Demonstration Script
+```bash
+.venv\Scripts\python scripts/demo_milestone4.py
+```
 
-## 11. Running FastAPI Server
-
+### Running FastAPI Server
 ```bash
 .venv\Scripts\python -m uvicorn backend.main:app --port 8000 --reload
 ```
 
-Access OpenAPI documentation at [http://localhost:8000/docs](http://localhost:8000/docs).
+Access Interactive API documentation at [http://localhost:8000/docs](http://localhost:8000/docs).
+

@@ -6,6 +6,8 @@ from datetime import datetime, date
 from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from backend.app.models.provenance import ProvenanceInfo
+
 
 # Supported constants
 ALLOWED_REGIONS = {"bay_of_bengal", "arabian_sea", "bay of bengal", "arabian sea"}
@@ -187,4 +189,50 @@ class NLQueryOutput(BaseModel):
     filters_applied: List[str] = Field(default_factory=list, description="List of recognized scientific filters applied")
     clarification: Optional[str] = Field(None, description="Explanation or clarification prompt if input was ambiguous or invalid")
     confidence: float = Field(1.0, description="Confidence score of natural language parsing (0.0 to 1.0)")
+
+
+class NLExecutionResponse(BaseModel):
+    """Response payload for POST /api/v1/nl-query/execute."""
+
+    original_query: str
+    status: str = Field(..., description="Status: 'success', 'clarification_needed', or 'error'")
+    interpreted_query: Optional[Dict[str, Any]] = Field(None, description="Validated QueryRequest dictionary if status is 'success'")
+    count: int = Field(0, description="Number of matching observation records returned")
+    results: List[Dict[str, Any]] = Field(default_factory=list, description="Matching observation records")
+    anomaly_summary: Optional[Dict[str, Any]] = Field(None, description="Summary of statistical anomaly detection if performed")
+    provenance: ProvenanceInfo = Field(..., description="Data provenance metadata")
+    sqlite_db_latency_ms: float = Field(0.0, description="SQLite query execution latency in ms")
+    total_latency_ms: float = Field(..., description="Total endpoint execution latency in ms")
+    clarification: Optional[str] = Field(None, description="Clarification request prompt if query was ambiguous")
+    confidence: float = Field(1.0, description="NL parsing confidence score")
+
+
+class TemperatureProfilePoint(BaseModel):
+    depth_m: float
+    temperature_c: float
+    temp_qc: str
+
+
+class SalinityProfilePoint(BaseModel):
+    depth_m: float
+    salinity_psu: float
+    psal_qc: str
+
+
+class ProfileAnalysisResponse(BaseModel):
+    """Response payload for GET /api/v1/profile/{float_id}/analysis."""
+
+    float_id: str
+    cycle_number: int
+    profile_time: str
+    latitude: float
+    longitude: float
+    region: str
+    temperature_profile: List[TemperatureProfilePoint] = Field(default_factory=list)
+    salinity_profile: List[SalinityProfilePoint] = Field(default_factory=list)
+    thermocline: Dict[str, Any] = Field(default_factory=dict, description="Thermocline estimation results")
+    salinity_gradient: Dict[str, Any] = Field(default_factory=dict, description="Salinity gradient / halocline estimation results")
+    provenance: ProvenanceInfo = Field(..., description="Data provenance metadata")
+    sqlite_db_latency_ms: float = Field(..., description="SQLite query execution latency in ms")
+    total_latency_ms: float = Field(..., description="Total endpoint execution latency in ms")
 
