@@ -79,7 +79,7 @@ export const MOCK_SYSTEM_STATUS: SystemStatus = {
     bayOfBengal: 20,
     arabianSea: 18,
   },
-  lastUpdated: "Jul 2025 (Dev Mock)",
+  lastUpdated: "Jul 2025",
   dataSourceLabel: "Development Mode (Backend Offline)",
   statusBadgeLabel: "Development Mode",
   activeMission: "Global Ocean Profiling Array",

@@ -20,6 +20,7 @@ import { MOCK_SYSTEM_STATUS } from "@/lib/mockArgoData";
 
 export default function Home() {
   const [status, setStatus] = useState<SystemStatus>(MOCK_SYSTEM_STATUS);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [recentQueries, setRecentQueries] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -106,9 +107,11 @@ export default function Home() {
       {/* 1. Cinematic Deep Ocean Atmosphere & ARGO Float Graphic */}
       <OceanBackground />
 
-      {/* 2. Left Glass Sidebar (Exact Match to Reference Image) */}
+      {/* 2. Collapsible Left Glass Sidebar (Houses the single SidebarToggle) */}
       <Sidebar
         status={status}
+        isOpen={sidebarOpen}
+        onToggleOpen={() => setSidebarOpen(!sidebarOpen)}
         recentQueries={recentQueries}
         onSelectRecentQuery={handleSendMessage}
         onSelectFeaturedQuery={handleSelectFeaturedQuery}
@@ -117,15 +120,19 @@ export default function Home() {
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
-      {/* 3. Main Viewport Shell */}
-      <div className="lg:pl-64 xl:pl-72 flex-1 flex flex-col h-full overflow-hidden relative z-10 justify-between">
+      {/* 3. Main Viewport Shell (Expands automatically when sidebar is closed) */}
+      <div
+        className={`flex-1 flex flex-col h-full overflow-hidden relative z-10 justify-between transition-all duration-200 ease-in-out ${
+          sidebarOpen ? "lg:pl-[256px]" : "lg:pl-[68px]"
+        }`}
+      >
         {/* Top-Right Status & Avatar */}
         <TopNav status={status} onOpenAbout={() => setIsAboutOpen(true)} />
 
         {/* Dynamic Center Content */}
         {messages.length === 0 ? (
           /* EXACT HOME VIEW (Identical to Reference Image) */
-          <div className="flex-1 flex flex-col justify-center max-w-5xl mx-auto w-full px-2 sm:px-6 py-2 overflow-y-auto scrollbar-none">
+          <div className="flex-1 flex flex-col justify-center max-w-4xl mx-auto w-full px-2 sm:px-6 py-1 overflow-y-auto scrollbar-none -mt-3">
             {/* Hero Section */}
             <HeroSection />
 
@@ -155,7 +162,7 @@ export default function Home() {
         )}
 
         {/* 4. FIXED Bottom Chat Composer (Exact Match with Reference Image) */}
-        <div className="flex-shrink-0 bg-gradient-to-t from-[#020713]/95 via-[#030a17]/90 to-transparent pt-1 pb-1 z-20">
+        <div className="flex-shrink-0 bg-gradient-to-t from-[#020814]/25 via-transparent to-transparent pt-1 pb-1 z-20">
           <QueryComposer
             initialQuery={composerInitialQuery}
             isLoading={isLoading}
