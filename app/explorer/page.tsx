@@ -59,6 +59,9 @@ export default function ExplorerPage() {
       {/* Sidebar Navigation */}
       <Sidebar
         status={status}
+        recentQueries={[]}
+        onSelectRecentQuery={() => {}}
+        onNewChat={() => { window.location.href = "/"; }}
         onOpenAbout={() => setIsAboutOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />

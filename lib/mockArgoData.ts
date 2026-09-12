@@ -43,8 +43,6 @@ export function generateRealisticProfile(
     }
 
     // Salinity curve:
-    // Bay of Bengal: lower surface salinity due to river runoff, increasing with depth to ~35.0 PSU
-    // Arabian Sea: high surface salinity (high evaporation), slight subsurface maximum, then ~34.8-35.0 PSU
     let sal = surfaceSal;
     if (region === "Bay of Bengal") {
       if (d < 100) {
@@ -65,7 +63,7 @@ export function generateRealisticProfile(
       depth: d,
       temperature: Number(temp.toFixed(2)),
       salinity: Number(sal.toFixed(2)),
-      pressure: Math.round(d * 1.01), // dbar approx 1:1 with meters
+      pressure: Math.round(d * 1.01),
       density: Number((1024 + (d / 100) * 1.1).toFixed(2)),
       qcTemp: 1, // QC flag 1: Good data
       qcSal: 1,
@@ -74,15 +72,16 @@ export function generateRealisticProfile(
 }
 
 export const MOCK_SYSTEM_STATUS: SystemStatus = {
-  isConnected: true,
-  isRealDataConnected: true,
+  isConnected: false,
+  isRealDataConnected: false,
   floatCount: {
     total: 38,
     bayOfBengal: 20,
     arabianSea: 18,
   },
-  lastUpdated: "Jul 2025",
-  dataSourceLabel: "ARGO Core NetCDF (INCOIS/GDAC)",
+  lastUpdated: "Jul 2025 (Dev Mock)",
+  dataSourceLabel: "Development Mode (Backend Offline)",
+  statusBadgeLabel: "Development Mode",
   activeMission: "Global Ocean Profiling Array",
 };
 
@@ -341,23 +340,30 @@ export const PRESET_FEATURED_QUERIES = [
       variable: "Temperature",
       depth: "0–500m",
       period: "2025",
-      analysis: "Anomaly Detection & Heatwave Analysis",
+      analysis: "Anomaly Detection",
     },
     sampleResult: {
-      summary: "Identified positive temperature anomalies in the Central & Eastern Bay of Bengal during Summer 2025 across depths 0–500m.",
-      scientificExplanation: "Analysis of 12 active ARGO profiles across 12°N–18°N reveals a subsurface thermal peak with temperatures reaching 29.4°C (+1.6°C above the 2004–2020 climatological mean, Z-score = +2.31σ). The thermocline barrier layer prevented efficient vertical mixing, sustaining elevated heat content down to 250 dbar.",
-      keyMetrics: [
-        { label: "Max Observed Temp", value: "29.4°C", subtext: "Surface to 50m layer" },
-        { label: "Climatological Baseline", value: "27.8°C", subtext: "WOD/ARGO 20-yr mean" },
-        { label: "Thermal Z-Score", value: "+2.31 σ", subtext: "Significant anomaly", isAnomaly: true },
-        { label: "Active Floats Analysed", value: "18 Floats", subtext: "Bay of Bengal array" },
+      summary: "Positive temperature anomaly detected across the central and eastern Bay of Bengal.",
+      keyValues: [
+        { label: "Surface Temperature", value: "29.4", unit: "°C" },
+        { label: "Thermal Anomaly", value: "+1.6", unit: "°C", isAnomaly: true },
+        { label: "Depth Range", value: "0–500", unit: "m" },
+        { label: "Profiles Analyzed", value: "12", unit: "floats" },
+        { label: "Region", value: "Central Bay of Bengal" },
       ],
+      interpretation: [
+        "Strongest thermal anomaly (+1.6 °C, Z = +2.31σ) concentrated in upper 50–200m stratum.",
+        "Signal attenuates below 250m as deep Indian Ocean water masses dominate.",
+        "Thermocline barrier layer appears to restrict vertical heat dissipation.",
+        "Float 2902235 recorded highest departure on July 14, 2025.",
+      ],
+      visualizationType: "ocean-3d" as const,
       provenance: {
         floatId: "2902235",
         cycle: 182,
         date: "Jul 14, 2025",
         location: "Bay of Bengal (14.45°N, 87.82°E)",
-        depth: "10m to 500m",
+        depth: "0–500 m",
         source: "ARGO Core NetCDF (argo-core-2902235_prof.nc)",
         dac: "INCOIS (India)",
         qcStatus: "QC Flag 1 (Good Data)",
@@ -377,23 +383,29 @@ export const PRESET_FEATURED_QUERIES = [
       variable: "Salinity",
       depth: "0–2000m",
       period: "Last 6 Months (Jan–Jul 2025)",
-      analysis: "Vertical Salinity Profile & Halocline",
+      analysis: "Vertical Halocline Profile",
     },
     sampleResult: {
-      summary: "High surface salinity structure (35.5–36.85 PSU) confirmed across North and Central Arabian Sea.",
-      scientificExplanation: "Profiles from floats 2902111 and 2902245 indicate intense surface evaporation creating a hyper-saline mixed layer (36.4–36.85 PSU). Below 150m, salinity stabilizes to North Indian Deep Water values (34.85 PSU). High-salinity Arabian Sea Water (ASW) subduction is evident in the 50–120m stratum.",
-      keyMetrics: [
-        { label: "Surface Salinity Max", value: "36.85 PSU", subtext: "Northern basin float 2902245" },
-        { label: "Deep Salinity (2000m)", value: "34.85 PSU", subtext: "Uniform deep basin" },
-        { label: "Halocline Gradient", value: "0.018 PSU/m", subtext: "Moderate vertical stability" },
-        { label: "Floats Profiled", value: "14 Floats", subtext: "Arabian Sea array" },
+      summary: "High surface salinity core (36.4–36.85 PSU) confirmed across Northern and Central Arabian Sea.",
+      keyValues: [
+        { label: "Max Surface Salinity", value: "36.85", unit: "PSU" },
+        { label: "Deep Salinity (2000m)", value: "34.85", unit: "PSU" },
+        { label: "Halocline Gradient", value: "0.018", unit: "PSU/m" },
+        { label: "Profiles Analyzed", value: "14", unit: "floats" },
+        { label: "Water Mass", value: "Arabian Sea High Salinity Water (ASHSW)" },
       ],
+      interpretation: [
+        "Intense evaporative forcing sustains high salinity (>36.5 PSU) in top 100m.",
+        "Subsurface subduction signature visible between 60–140m depths.",
+        "Deep basin salinity stabilizes at ~34.85 PSU below 1000m.",
+      ],
+      visualizationType: "ts-profile" as const,
       provenance: {
         floatId: "2902245",
         cycle: 154,
         date: "Jul 08, 2025",
         location: "Arabian Sea (21.15°N, 63.40°E)",
-        depth: "0m to 2000m",
+        depth: "0–2000 m",
         source: "ARGO Core NetCDF (argo-core-2902245_prof.nc)",
         dac: "AOML / INCOIS",
         qcStatus: "QC Flag 1 (Good Data)",
@@ -412,24 +424,30 @@ export const PRESET_FEATURED_QUERIES = [
       region: "Bay of Bengal",
       variable: "Thermocline Depth",
       depth: "0–300m",
-      period: "Summer 2025 (May–Jul 2025)",
-      analysis: "Thermocline Gradient & MLD Calculation",
+      period: "Summer 2025",
+      analysis: "Gradient & MLD Calculation",
     },
     sampleResult: {
-      summary: "Thermocline depth (D20 isotherm) in the Bay of Bengal is located between 52m and 78m.",
-      scientificExplanation: "Calculated using the maximum vertical temperature gradient criterion (dT/dz < -0.05°C/m) and the 20°C isotherm depth. In the northern Bay of Bengal (float 2902094), strong freshwater stratification shoals the mixed layer to ~25m with a sharp thermocline starting at 52m. In the central basin, thermocline depth deepens to 65–78m.",
-      keyMetrics: [
-        { label: "Mean Thermocline Depth", value: "68.4 m", subtext: "Central Bay of Bengal" },
-        { label: "Northern Shoaling Limit", value: "52.0 m", subtext: "18°N latitude" },
-        { label: "Max Temp Gradient", value: "-0.18 °C/m", subtext: "Sharp thermocline slope" },
-        { label: "D20 Isotherm Depth", value: "72.5 m", subtext: "Summer climatology mean" },
+      summary: "Thermocline depth in the Bay of Bengal ranges between 52 m and 78 m across summer profiles.",
+      keyValues: [
+        { label: "Median Thermocline Depth", value: "68", unit: "m" },
+        { label: "Shallowest Limit (North)", value: "52", unit: "m" },
+        { label: "Deepest Limit (Central)", value: "78", unit: "m" },
+        { label: "Max Temp Gradient", value: "-0.18", unit: "°C/m" },
+        { label: "D20 Isotherm", value: "72.5", unit: "m" },
       ],
+      interpretation: [
+        "Northern Bay of Bengal exhibits shoaled thermocline (~52m) due to freshwater stratification.",
+        "Central basin exhibits deeper thermocline (68–78m) under anticyclonic wind stress curl.",
+        "Rapid temperature drop observed across the 60–120m depth interval.",
+      ],
+      visualizationType: "ts-profile" as const,
       provenance: {
         floatId: "2902235",
         cycle: 182,
         date: "Jul 14, 2025",
         location: "Bay of Bengal (14.45°N, 87.82°E)",
-        depth: "50m to 150m",
+        depth: "50–150 m",
         source: "ARGO Core NetCDF (argo-core-2902235_prof.nc)",
         dac: "INCOIS (India)",
         qcStatus: "QC Flag 1 (Good Data)",
@@ -445,29 +463,35 @@ export const PRESET_FEATURED_QUERIES = [
     query: "Detect marine heatwaves in the Indian Ocean in the last 2 years.",
     understood: {
       originalQuery: "Detect marine heatwaves in the Indian Ocean in the last 2 years.",
-      region: "Indian Ocean Basin (BoB + Arabian Sea)",
+      region: "Indian Ocean Basin",
       variable: "Marine Heatwaves (MHW)",
       depth: "0–300m",
-      period: "2023–2025 (24 Months)",
-      analysis: "Hobday MHW Category & Climatology Exceedance",
+      period: "2023–2025",
+      analysis: "Hobday Protocol Anomaly",
     },
     sampleResult: {
-      summary: "Detected 3 Category II (Strong) and 1 Category III (Severe) Marine Heatwave events in 2024–2025.",
-      scientificExplanation: "Following the Hobday et al. (2016) marine heatwave identification protocol (SST > 90th percentile for ≥5 consecutive days), extensive thermal anomalies occurred in the northern Bay of Bengal (June–July 2025) and Southeastern Arabian Sea (April–May 2024). Subsurface heat penetration reached 120m, driven by anomalous anticyclonic eddy trapping.",
-      keyMetrics: [
-        { label: "Peak Heatwave Intensity", value: "+2.85°C", subtext: "Above 90th percentile", isAnomaly: true },
-        { label: "Max Cumulative Intensity", value: "54.2 °C·days", subtext: "Category II Strong" },
-        { label: "Subsurface Penetration", value: "115 m", subtext: "Below mixed layer" },
-        { label: "Affected Float Records", value: "24 Floats", subtext: "Confirmed by ARGO Core" },
+      summary: "Detected 3 Category II (Strong) and 1 Category III (Severe) marine heatwave events in 2024–2025.",
+      keyValues: [
+        { label: "Peak Temperature Anomaly", value: "+2.85", unit: "°C", isAnomaly: true },
+        { label: "Max Cumulative Intensity", value: "54.2", unit: "°C·days" },
+        { label: "Subsurface Penetration", value: "115", unit: "m" },
+        { label: "Affected Float Records", value: "24", unit: "floats" },
+        { label: "Severity Category", value: "Category II (Strong)" },
       ],
+      interpretation: [
+        "Major warming events concentrated in Northern Bay of Bengal and Southeastern Arabian Sea.",
+        "Subsurface thermal signals persisted up to 115m beneath the surface mixed layer.",
+        "Anomalous anticyclonic eddy dynamics contributed to heat trapping.",
+      ],
+      visualizationType: "ocean-3d" as const,
       provenance: {
         floatId: "2903332",
         cycle: 140,
         date: "Jul 09, 2025",
         location: "Andaman Basin (11.60°N, 92.80°E)",
-        depth: "0m to 300m",
+        depth: "0–300 m",
         source: "ARGO Core NetCDF (argo-core-2903332_prof.nc)",
-        dac: "Coriolis (France) & INCOIS",
+        dac: "Coriolis & INCOIS",
         qcStatus: "QC Flag 1 (Good Data)",
       },
     },

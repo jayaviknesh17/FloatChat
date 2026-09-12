@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   Route,
   Loader2,
-  Sparkles,
 } from "lucide-react";
 
 interface QueryComposerProps {
@@ -60,21 +59,22 @@ export default function QueryComposer({
     if (!query.trim() && selectedFilters.length === 0) return;
     const finalQuery = query.trim() || `Analyze ${selectedFilters.join(", ")} in ARGO Core dataset`;
     onSubmit(finalQuery, selectedFilters);
+    setQuery("");
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-4 pt-2 pb-6">
-      {/* Main Glass Composer Container (Exact Match with Reference Image) */}
-      <div className="ocean-glass-input-container rounded-3xl p-3 sm:p-4 transition-all focus-within:border-cyan-400/60 focus-within:shadow-[0_0_35px_rgba(34,211,238,0.25)]">
-        {/* Upper Row: Attachment Icon + Text Input + Send Button */}
-        <div className="flex items-center gap-3">
+    <div className="w-full max-w-4xl mx-auto px-3 sm:px-6 py-3 select-none">
+      {/* Main Glass Chat Composer Container (Exact Match with Reference Image) */}
+      <div className="ocean-glass-input-container rounded-2xl sm:rounded-3xl p-2.5 sm:p-3.5 transition-all focus-within:border-cyan-400/60 focus-within:shadow-[0_0_30px_rgba(34,211,238,0.25)]">
+        {/* Upper Row: Attachment Button + Input + Send Button */}
+        <div className="flex items-center gap-2 sm:gap-3">
           {/* Attachment / Data Source Icon Button */}
           <button
             type="button"
             title="Attach data filter or region"
-            className="p-2.5 rounded-full text-slate-400 hover:text-cyan-300 hover:bg-cyan-950/40 transition-colors shrink-0"
+            className="p-2 rounded-full text-slate-400 hover:text-cyan-300 hover:bg-cyan-950/40 transition-colors shrink-0"
           >
-            <Paperclip className="w-5 h-5" />
+            <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
 
           {/* Text Input */}
@@ -84,7 +84,7 @@ export default function QueryComposer({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask anything about the ocean..."
-            className="flex-1 bg-transparent border-none outline-none text-sm sm:text-base text-white placeholder-slate-400 font-normal focus:ring-0"
+            className="flex-1 bg-transparent border-none outline-none text-xs sm:text-sm text-white placeholder-slate-400 font-normal focus:ring-0"
           />
 
           {/* Glowing Radial Send Button (Exact Match with Reference Image) */}
@@ -92,22 +92,22 @@ export default function QueryComposer({
             type="button"
             onClick={handleSubmit}
             disabled={isLoading || (!query.trim() && selectedFilters.length === 0)}
-            className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center shrink-0 transition-all ${
+            className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 transition-all ${
               query.trim() || selectedFilters.length > 0
-                ? "bg-gradient-to-tr from-cyan-500 via-sky-400 to-blue-500 text-slate-950 shadow-[0_0_20px_rgba(34,211,238,0.6)] hover:scale-105 active:scale-95"
+                ? "bg-gradient-to-tr from-cyan-500 via-sky-400 to-blue-500 text-slate-950 shadow-[0_0_18px_rgba(34,211,238,0.5)] hover:scale-105 active:scale-95"
                 : "bg-slate-800/80 text-slate-500 cursor-not-allowed border border-slate-700/50"
             }`}
           >
             {isLoading ? (
-              <Loader2 className="w-5 h-5 animate-spin text-white" />
+              <Loader2 className="w-4 h-4 animate-spin text-white" />
             ) : (
-              <ArrowUp className="w-5 h-5 stroke-[2.5]" />
+              <ArrowUp className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
             )}
           </button>
         </div>
 
-        {/* Lower Row: Quick-Filter Chips (Exact Match with Reference Image) */}
-        <div className="mt-3 pt-3 border-t border-cyan-500/10 flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        {/* Lower Row: Quick-Filter Chips */}
+        <div className="mt-2.5 pt-2 border-t border-cyan-500/10 flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
           {filterChips.map((chip) => {
             const Icon = chip.icon;
             const isSelected = selectedFilters.includes(chip.label);
@@ -116,13 +116,13 @@ export default function QueryComposer({
                 key={chip.id}
                 type="button"
                 onClick={() => toggleFilter(chip.label)}
-                className={`ocean-chip flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap select-none transition-all ${
+                className={`ocean-chip flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap select-none transition-all ${
                   isSelected
-                    ? "active bg-cyan-900/60 border-cyan-400 text-cyan-200 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
+                    ? "active bg-cyan-900/60 border-cyan-400 text-cyan-200 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
                     : "text-slate-300 hover:text-white"
                 }`}
               >
-                <Icon className={`w-3.5 h-3.5 ${isSelected ? "text-cyan-300" : "text-cyan-400/70"}`} />
+                <Icon className={`w-3 h-3 ${isSelected ? "text-cyan-300" : "text-cyan-400/70"}`} />
                 <span>{chip.label}</span>
               </button>
             );

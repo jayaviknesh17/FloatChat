@@ -84,24 +84,42 @@ export interface DataProvenance {
   qcStatus: string;
 }
 
-export interface QueryMetric {
+export interface KeyValueMetric {
   label: string;
   value: string;
-  subtext?: string;
+  unit?: string;
   isAnomaly?: boolean;
-  trend?: "up" | "down" | "neutral";
 }
+
+export type VisualizationType = "none" | "ocean-3d" | "ts-profile" | "anomaly" | "trajectory";
 
 export interface QueryResult {
   queryId: string;
   queryText: string;
   understood: UnderstoodQuery;
   summary: string;
-  scientificExplanation: string;
-  keyMetrics: QueryMetric[];
+  keyValues: KeyValueMetric[];
+  interpretation: string[];
+  visualizationType: VisualizationType;
   matchedFloats: ArgoFloat[];
   provenance: DataProvenance;
   timestamp: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  sender: "user" | "floatchat";
+  text?: string;
+  result?: QueryResult;
+  timestamp: string;
+  isLoading?: boolean;
+}
+
+export interface ChatConversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  messages: ChatMessage[];
 }
 
 export interface SystemStatus {
@@ -114,5 +132,6 @@ export interface SystemStatus {
   };
   lastUpdated: string;
   dataSourceLabel: string;
+  statusBadgeLabel: string;
   activeMission: string;
 }

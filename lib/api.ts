@@ -1,4 +1,4 @@
-import { ArgoFloat, SystemStatus, QueryResult, UnderstoodQuery } from "./types";
+import { ArgoFloat, SystemStatus, QueryResult, UnderstoodQuery, VisualizationType } from "./types";
 import { MOCK_ARGO_FLOATS, MOCK_SYSTEM_STATUS, PRESET_FEATURED_QUERIES } from "./mockArgoData";
 
 const BACKEND_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -21,17 +21,23 @@ export async function getSystemStatus(): Promise<SystemStatus> {
       return {
         isConnected: true,
         isRealDataConnected: true,
-        floatCount: data.floatCount || MOCK_SYSTEM_STATUS.floatCount,
-        lastUpdated: data.lastUpdated || "Jul 2025",
-        dataSourceLabel: data.dataSourceLabel || "Live Backend (ARGO NetCDF)",
+        floatCount: data.floatCount || { total: 38, bayOfBengal: 20, arabianSea: 18 },
+        lastUpdated: data.lastUpdated || "Live",
+        dataSourceLabel: data.dataSourceLabel || "Real ARGO data",
+        statusBadgeLabel: "Real ARGO Data",
         activeMission: "Global Ocean Profiling Array",
       };
     }
   } catch {
-    // Graceful fallback to development data if backend is offline
+    // Backend offline
   }
 
-  return MOCK_SYSTEM_STATUS;
+  return {
+    ...MOCK_SYSTEM_STATUS,
+    isRealDataConnected: false,
+    statusBadgeLabel: "Development Mode",
+    dataSourceLabel: "Development mode — backend unavailable",
+  };
 }
 
 /**
@@ -84,16 +90,23 @@ export async function submitOceanQuery(
   }
 
   let variable = "Temperature & Salinity";
+  let vizType: VisualizationType = "ocean-3d";
+
   if (lower.includes("temp") || (selectedFilters && selectedFilters.includes("Temperature"))) {
     variable = "Temperature";
+    vizType = lower.includes("anomal") ? "ocean-3d" : "ts-profile";
   } else if (lower.includes("salin") || (selectedFilters && selectedFilters.includes("Salinity"))) {
     variable = "Salinity";
+    vizType = "ts-profile";
   } else if (lower.includes("thermocline") || lower.includes("mld")) {
     variable = "Thermocline Depth";
+    vizType = "ts-profile";
   } else if (lower.includes("heatwave") || lower.includes("mhw")) {
     variable = "Marine Heatwaves (MHW)";
+    vizType = "ocean-3d";
   } else if (lower.includes("traject") || (selectedFilters && selectedFilters.includes("Float Trajectories"))) {
     variable = "Float Trajectories";
+    vizType = "ocean-3d";
   }
 
   let depth = "0–2000m";
@@ -105,12 +118,12 @@ export async function submitOceanQuery(
   let period = "2024–2025";
   if (lower.includes("6 months")) period = "Last 6 Months (Jan–Jul 2025)";
   else if (lower.includes("summer")) period = "Summer 2025";
-  else if (lower.includes("2 years")) period = "2023–2025 (24 Months)";
+  else if (lower.includes("2 years")) period = "2023–2025";
 
   let analysis = "Oceanographic Analysis";
   if (lower.includes("anomal") || (selectedFilters && selectedFilters.includes("Anomalies"))) analysis = "Anomaly Detection";
   else if (lower.includes("profile") || lower.includes("plot")) analysis = "Vertical CTD Profile";
-  else if (lower.includes("where") || lower.includes("depth")) analysis = "Layer Depth & Gradient Calculation";
+  else if (lower.includes("where") || lower.includes("depth")) analysis = "Layer Depth & Gradient";
 
   const understood: UnderstoodQuery = matchedPreset?.understood || {
     originalQuery: query,
@@ -127,8 +140,9 @@ export async function submitOceanQuery(
       queryText: query,
       understood,
       summary: matchedPreset.sampleResult.summary,
-      scientificExplanation: matchedPreset.sampleResult.scientificExplanation,
-      keyMetrics: matchedPreset.sampleResult.keyMetrics,
+      keyValues: matchedPreset.sampleResult.keyValues,
+      interpretation: matchedPreset.sampleResult.interpretation,
+      visualizationType: matchedPreset.sampleResult.visualizationType,
       matchedFloats: MOCK_ARGO_FLOATS.filter(
         (f) =>
           f.region === matchedPreset.understood.region ||
@@ -149,14 +163,20 @@ export async function submitOceanQuery(
     queryId: `query_${Date.now()}`,
     queryText: query,
     understood,
-    summary: `Synthesized ${variable} data across ${region} using active ARGO Core profiling floats for ${period}.`,
-    scientificExplanation: `Computed vertical distribution of ${variable.toLowerCase()} across ${depth} depth interval. Data retrieved from ${relevantFloats.length} high-resolution CTD profiles processed with TEOS-10 standard equation of state. Observations show robust stratifications consistent with seasonal monsoon forcing.`,
-    keyMetrics: [
-      { label: "Analyzed Region", value: region, subtext: "Northern Indian Ocean" },
-      { label: "Target Variable", value: variable, subtext: `${depth} layer` },
-      { label: "Active Float Count", value: `${relevantFloats.length} Floats`, subtext: "ARGO Core array" },
-      { label: "Data Quality Status", value: "QC Flag 1", subtext: "100% Real-time Quality Controlled" },
+    summary: `Analyzed ${variable.toLowerCase()} across ${region} using active ARGO Core profiling records for ${period}.`,
+    keyValues: [
+      { label: "Target Region", value: region },
+      { label: "Variable", value: variable },
+      { label: "Depth Interval", value: depth },
+      { label: "Profiles Sampled", value: `${relevantFloats.length}`, unit: "floats" },
+      { label: "Data Quality Flag", value: "QC Flag 1" },
     ],
+    interpretation: [
+      `Computed vertical distribution across ${depth} depth interval using TEOS-10 equation of state.`,
+      `Observational data retrieved from ${relevantFloats.length} high-resolution CTD profiles in the basin.`,
+      `Vertical stratification shows consistent seasonal monsoon dynamics.`,
+    ],
+    visualizationType: vizType,
     matchedFloats: relevantFloats,
     provenance: {
       floatId: primaryFloat.id,
