@@ -4,8 +4,10 @@ import React, { useState, useEffect } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import TopNav from "@/components/layout/TopNav";
 import OceanBackground from "@/components/layout/OceanBackground";
-import ChatContainer from "@/components/chat/ChatContainer";
+import HeroSection from "@/components/hero/HeroSection";
+import FeaturedQueryCards from "@/components/cards/FeaturedQueryCards";
 import QueryComposer from "@/components/query/QueryComposer";
+import ChatContainer from "@/components/chat/ChatContainer";
 import Footer from "@/components/layout/Footer";
 import FloatProfilePanel from "@/components/panels/FloatProfilePanel";
 import AnomalyPanel from "@/components/panels/AnomalyPanel";
@@ -83,7 +85,11 @@ export default function Home() {
     }
   };
 
-  const handleSelectRecentQuery = (queryText: string) => {
+  const handleSelectFeaturedQuery = (queryText: string) => {
+    if (!queryText) {
+      handleNewChat();
+      return;
+    }
     handleSendMessage(queryText);
   };
 
@@ -96,47 +102,60 @@ export default function Home() {
   };
 
   return (
-    <div className="relative h-screen w-screen bg-[#030a17] text-white overflow-hidden flex flex-row">
+    <div className="relative h-screen w-screen bg-[#030a17] text-white overflow-hidden flex flex-row select-none">
       {/* 1. Cinematic Deep Ocean Atmosphere & ARGO Float Graphic */}
       <OceanBackground />
 
-      {/* 2. Left Glass Sidebar (Chatbot Style with Recent Chats) */}
+      {/* 2. Left Glass Sidebar (Exact Match to Reference Image) */}
       <Sidebar
         status={status}
         recentQueries={recentQueries}
-        onSelectRecentQuery={handleSelectRecentQuery}
+        onSelectRecentQuery={handleSendMessage}
+        onSelectFeaturedQuery={handleSelectFeaturedQuery}
         onNewChat={handleNewChat}
         onOpenAbout={() => setIsAboutOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
-      {/* 3. Main Chat Viewport Shell (Fixed 100vh, Independent Message Scroll, Fixed Bottom Composer) */}
-      <div className="lg:pl-64 xl:pl-72 flex-1 flex flex-col h-full overflow-hidden relative z-10">
+      {/* 3. Main Viewport Shell */}
+      <div className="lg:pl-64 xl:pl-72 flex-1 flex flex-col h-full overflow-hidden relative z-10 justify-between">
         {/* Top-Right Status & Avatar */}
         <TopNav status={status} onOpenAbout={() => setIsAboutOpen(true)} />
 
-        {/* Scrollable Conversation Stream (The ONLY area that scrolls) */}
-        <ChatContainer
-          messages={messages}
-          isLoading={isLoading}
-          onSelectQuery={handleSendMessage}
-          onSelectFloat={(af) => setSelectedFloat(af)}
-          onOpenEvidence={(af) => {
-            setSelectedProvenance({
-              floatId: af.id,
-              cycle: af.lastCycle,
-              date: af.lastDate,
-              location: `${af.region} (${af.lat}°N, ${af.lon}°E)`,
-              depth: "0–2000m",
-              source: `ARGO Core NetCDF (${af.netcdfSource})`,
-              dac: af.dac,
-              qcStatus: "QC Flag 1 (Good Data)",
-            });
-          }}
-        />
+        {/* Dynamic Center Content */}
+        {messages.length === 0 ? (
+          /* EXACT HOME VIEW (Identical to Reference Image) */
+          <div className="flex-1 flex flex-col justify-center max-w-5xl mx-auto w-full px-2 sm:px-6 py-2 overflow-y-auto scrollbar-none">
+            {/* Hero Section */}
+            <HeroSection />
 
-        {/* FIXED Bottom Chat Composer (Never moves during conversation scrolling) */}
-        <div className="flex-shrink-0 bg-gradient-to-t from-[#020713]/95 via-[#030a17]/90 to-transparent pt-2 pb-1 z-20">
+            {/* 4 Large Glass Cards */}
+            <FeaturedQueryCards onSelectQuery={handleSendMessage} />
+          </div>
+        ) : (
+          /* ACTIVE CONVERSATION STREAM (When queries are sent) */
+          <ChatContainer
+            messages={messages}
+            isLoading={isLoading}
+            onSelectQuery={handleSendMessage}
+            onSelectFloat={(af) => setSelectedFloat(af)}
+            onOpenEvidence={(af) => {
+              setSelectedProvenance({
+                floatId: af.id,
+                cycle: af.lastCycle,
+                date: af.lastDate,
+                location: `${af.region} (${af.lat}°N, ${af.lon}°E)`,
+                depth: "0–2000m",
+                source: `ARGO Core NetCDF (${af.netcdfSource})`,
+                dac: af.dac,
+                qcStatus: "QC Flag 1 (Good Data)",
+              });
+            }}
+          />
+        )}
+
+        {/* 4. FIXED Bottom Chat Composer (Exact Match with Reference Image) */}
+        <div className="flex-shrink-0 bg-gradient-to-t from-[#020713]/95 via-[#030a17]/90 to-transparent pt-1 pb-1 z-20">
           <QueryComposer
             initialQuery={composerInitialQuery}
             isLoading={isLoading}
