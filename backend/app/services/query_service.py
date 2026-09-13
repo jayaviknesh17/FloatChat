@@ -397,9 +397,10 @@ class QueryService:
         nl_service = NLQueryService()
         parsed = nl_service.parse_query(query_text)
 
-        # Handle clarification needed or parsing errors
+        # Handle conversational queries, clarification needed, or parsing errors
         if parsed.status != "success" or not parsed.interpreted_query:
             end_total = time.perf_counter()
+            qc_note = "General conversational query processed without database execution." if parsed.status == "conversational" else "Query required clarification or failed parsing before database execution."
             return NLExecutionResponse(
                 original_query=query_text,
                 status=parsed.status,
@@ -415,12 +416,13 @@ class QueryService:
                     variables=[],
                     region=None,
                     date_range={"start": None, "end": None},
-                    processing_qc_notes="Query required clarification or failed parsing before database execution."
+                    processing_qc_notes=qc_note
                 ),
                 sqlite_db_latency_ms=0.0,
                 total_latency_ms=round((end_total - start_total) * 1000, 3),
                 clarification=parsed.clarification,
-                confidence=parsed.confidence
+                confidence=parsed.confidence,
+                conversational_response=parsed.conversational_response
             )
 
         # Build validated QueryRequest

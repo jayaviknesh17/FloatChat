@@ -30,7 +30,8 @@ class NLQueryService:
     def parse_query(self, query_text: str) -> NLQueryOutput:
         """
         Main entry point for parsing natural language query.
-        Attempts LLM parsing if configured; otherwise uses deterministic rule parser.
+        Routes general conversation queries to conversational response engine (Gemini or offline fallback).
+        Routes scientific queries to existing scientific pipeline (Gemini LLM parser or deterministic rule engine).
         """
         if not query_text or not query_text.strip():
             return NLQueryOutput(
@@ -42,6 +43,29 @@ class NLQueryService:
 
         clean_text = query_text.strip()
 
+        # Step 0: Deterministic intent classification
+        intent = self._classify_intent(clean_text)
+
+        if intent == "conversational":
+            # Try Gemini conversational response if API key is provided
+            if settings.GEMINI_API_KEY and settings.LLM_PROVIDER == "gemini":
+                try:
+                    conv_result = self._generate_conversational_response_with_gemini(clean_text)
+                    if conv_result:
+                        return conv_result
+                except Exception as e:
+                    logger.warning(f"Gemini conversational response failed: {e}. Falling back to offline response.")
+
+            # Offline / Fallback conversational response
+            offline_reply = self._generate_offline_conversational_response(clean_text)
+            return NLQueryOutput(
+                original_query=clean_text,
+                status="conversational",
+                conversational_response=offline_reply,
+                confidence=1.0
+            )
+
+        # Scientific Query Path (Unchanged)
         # Try LLM parsing if API key is provided
         if settings.GEMINI_API_KEY and settings.LLM_PROVIDER == "gemini":
             try:
@@ -53,6 +77,138 @@ class NLQueryService:
 
         # Fallback: Deterministic Rule Engine
         return self._parse_with_rules(clean_text)
+
+    def _classify_intent(self, text: str) -> str:
+        """
+        Classify input query as either 'scientific' (data/analysis retrieval)
+        or 'conversational' (general greeting, capability, educational/conceptual).
+        """
+        lower = text.lower().strip()
+
+        # 1. Float ID or cycle number -> ALWAYS scientific
+        if re.search(r'\b(?:float|platform)\s*#?\s*\d{7}\b', lower) or re.search(r'\b\d{7}\b', lower) or re.search(r'\bcycle\s*#?\s*\d+\b', lower):
+            return "scientific"
+
+        # 2. Check for conceptual / explanation request ("explanation of", "explain")
+        if "explanation of" in lower or "explain" in lower:
+            if not any(kw in lower for kw in ["observations", "measurements", "data points", "raw data"]):
+                return "conversational"
+
+        # 3. Check for conceptual question prefixes ("what is", "what are", "tell me about", "what can you tell me")
+        is_conceptual = False
+        if any(lower.startswith(prefix) or f" {prefix}" in lower for prefix in [
+            "what is ", "what are ", "explain ", "tell me about", "what does ", "how does ",
+            "what can you tell me", "what do you know about"
+        ]):
+            is_conceptual = True
+
+        # 4. Explicit data request verbs / phrases
+        data_action_verbs = [
+            "show", "find", "get", "retrieve", "fetch", "query", "plot", "extract",
+            "display", "list", "give me", "give", "download", "select", "filter"
+        ]
+        has_data_action = any(re.search(r'\b' + re.escape(verb) + r'\b', lower) for verb in data_action_verbs)
+
+        # 5. Explicit data nouns
+        data_nouns = ["observations", "observation", "records", "measurements", "data points", "raw data"]
+        has_data_noun = any(noun in lower for noun in data_nouns)
+
+        # 6. Specific scientific request with data action / noun
+        if has_data_action or has_data_noun:
+            return "scientific"
+
+        # 7. If conceptual question ("What is thermocline?", "Tell me about salinity", "What can you tell me about the Bay of Bengal?")
+        if is_conceptual:
+            # Exception: "What is the temperature in Bay of Bengal?" asks for specific variable data in a region
+            has_region = "bay of bengal" in lower or "bob" in lower or "arabian sea" in lower or "arabian" in lower
+            has_variable = "temperature" in lower or "salinity" in lower or "temp" in lower or "psal" in lower
+            if has_region and has_variable:
+                return "scientific"
+            return "conversational"
+
+        # 8. Check common greetings / courtesy / capability questions
+        words = re.findall(r'\b\w+\b', lower)
+        greetings = ["hi", "hello", "hey", "greetings", "howdy", "thanks", "thank", "thx", "cheers"]
+        if len(words) <= 3 and any(w in greetings for w in words):
+            return "conversational"
+
+        if any(phrase in lower for phrase in ["what can you do", "who are you", "capabilities", "help"]):
+            return "conversational"
+
+        # 9. Out of scope regions (Pacific, Atlantic, etc.) -> route to scientific so parser returns clear out-of-scope message
+        out_of_scope = ["pacific", "atlantic", "arctic", "southern ocean", "mediterranean"]
+        if any(r in lower for r in out_of_scope):
+            return "scientific"
+
+        # 10. Region + Variable combination without conceptual prefix -> Scientific
+        has_region = "bay of bengal" in lower or "bob" in lower or "arabian sea" in lower or "arabian" in lower
+        has_variable = "temperature" in lower or "salinity" in lower
+        if has_region and has_variable:
+            return "scientific"
+
+        # Default fallback for ambiguous general text
+        return "conversational"
+
+    def _generate_conversational_response_with_gemini(self, text: str) -> Optional[NLQueryOutput]:
+        """Generate friendly conversational response using Google Gemini API."""
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
+
+        system_instruction = """
+You are FloatChat, an AI oceanographic assistant for exploring real ARGO ocean data.
+Rules:
+1. You may explain oceanographic concepts (such as thermocline, halocline, salinity, temperature profiles, ARGO floats, etc.) in simple, clear language.
+2. You may explain FloatChat capabilities (data exploration, anomaly detection, thermocline estimation, 3D float trajectory visualization).
+3. You MUST NOT invent ARGO observations, temperature/salinity measurements, anomaly values, float locations, or scientific dataset results.
+4. If the user requests actual ocean data or observation records, explain that they can ask data questions like "Show temperature in Bay of Bengal".
+5. Keep your response concise, helpful, and friendly (1-3 paragraphs max).
+"""
+
+        payload = {
+            "contents": [{"parts": [{"text": f"{system_instruction}\nUser Message: \"{text}\""}]}]
+        }
+
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+            body = resp.read().decode("utf-8")
+            data = json.loads(body)
+            raw_content = data["candidates"][0]["content"]["parts"][0]["text"]
+            return NLQueryOutput(
+                original_query=text,
+                status="conversational",
+                conversational_response=raw_content.strip(),
+                confidence=1.0
+            )
+
+    def _generate_offline_conversational_response(self, text: str) -> str:
+        """Deterministic offline fallback for conversational queries when GEMINI_API_KEY is absent or fails."""
+        lower = text.lower().strip()
+        words = re.findall(r'\b\w+\b', lower)
+
+        if len(words) <= 3 and any(w in ["hi", "hello", "hey", "greetings", "howdy"] for w in words):
+            return "Hello! I'm FloatChat, your AI oceanographic assistant. I can help you explore real ARGO ocean data."
+
+        if any(ph in lower for ph in ["what can you do", "who are you", "capabilities", "what do you do"]):
+            return "I can explore real ARGO data, analyze temperature and salinity, detect anomalies, estimate thermoclines and haloclines, and visualize float trajectories."
+
+        if len(words) <= 3 and any(w in ["thanks", "thank", "thx", "cheers"] for w in words):
+            return "You're welcome! Let me know what you'd like to explore."
+
+        if "thermocline" in lower:
+            return "The thermocline is an ocean layer where temperature decreases rapidly with increasing depth, separating the warm surface mixed layer from the cold deep ocean."
+
+        if "salinity" in lower or "halocline" in lower:
+            return "Salinity measures dissolved salt concentration in seawater (in PSU). Rapid salinity changes with depth form a halocline."
+
+        if "bay of bengal" in lower or "arabian sea" in lower:
+            return "The Bay of Bengal and Arabian Sea are the primary Indian Ocean regions supported by FloatChat for real ARGO float observation queries."
+
+        return "I am FloatChat, your AI oceanographic assistant. You can ask me to explain ocean concepts or request data queries like 'Show temperature in Bay of Bengal'."
 
     def _parse_with_gemini(self, text: str) -> Optional[NLQueryOutput]:
         """Parse query using Google Gemini API REST interface."""

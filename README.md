@@ -146,14 +146,31 @@ The script logs progress and outputs a summary report covering:
 
 ---
 
-## 9. Natural Language Query Engine (Milestone 3 & 4)
+## 9. Natural Language Query Engine & General Conversation Layer
 
 The Natural Language Query Engine provides two endpoints:
-- `POST /api/v1/nl-query`: Translates natural language questions into validated structured `QueryRequest` parameters without executing the query.
-- `POST /api/v1/nl-query/execute`: Translates user questions into validated parameters, executes parameterized SQLite queries against the 3.4M-row ARGO database, runs statistical anomaly detection if applicable, and returns matching observation records with full data provenance.
+- `POST /api/v1/nl-query`: Translates natural language questions into validated structured `QueryRequest` parameters or general conversational responses without executing database queries.
+- `POST /api/v1/nl-query/execute`: Processes incoming messages through a deterministic Intent Router. General conversational messages return friendly explanations and short-circuit SQLite execution. Scientific queries are parsed, validated, and executed against the 3.4M-row ARGO SQLite database, returning real observation records with full data provenance.
 
 > [!IMPORTANT]
-> **Safety Guarantee**: The engine **NEVER** generates or executes arbitrary SQL code from the LLM. All execution occurs strictly through parameterized SQLite queries in `QueryService`.
+> **Safety & Integrity Guarantees**:
+> 1. **No LLM SQL Generation**: The system **NEVER** generates or executes arbitrary SQL from an LLM.
+> 2. **No Fabricated Ocean Observations**: The conversational layer handles text generation and concept explanations ONLY. All scientific data observations come strictly from real ARGO NetCDF files stored in SQLite.
+> 3. **100% Offline Capability**: If `GEMINI_API_KEY` is missing or the API is unreachable, the system automatically uses deterministic rule-based parsing and static friendly offline responses.
+
+### Intent Routing Rules
+
+The Intent Router evaluates input messages BEFORE the scientific parser:
+- **General Conversation Path** (`status: "conversational"`):
+  - Greetings (`"Hi"`, `"Hello"`)
+  - Capabilities (`"What can you do?"`)
+  - Courtesy (`"Thanks!"`)
+  - Educational/conceptual questions without explicit data request verbs (`"Explain thermocline simply"`, `"What is thermocline?"`, `"Tell me about salinity"`, `"What can you tell me about the Bay of Bengal?"`)
+  - *Response*: Returns `conversational_response` text, `count: 0`, and `results: []`. Short-circuits SQLite execution (`sqlite_db_latency_ms: 0.0`).
+- **Scientific Data Query Path** (`status: "success"`):
+  - Explicit data action verbs (`show`, `find`, `retrieve`, `query`, `plot`, `give me`) paired with ocean variables, regions, float IDs, cycles, or depth bounds.
+  - Examples: `"Show temperature in Bay of Bengal"`, `"Show thermocline in Bay of Bengal"`, `"Show salinity data in Arabian Sea"`, `"Show temperature anomalies in Bay of Bengal"`, `"Show data for float 2902236"`.
+  - *Response*: Executes indexed SQLite query on real ARGO data, returning matching observations and complete provenance metadata.
 
 ### Configuration
 Set the following environment variables:
@@ -163,7 +180,7 @@ export LLM_PROVIDER=gemini
 export GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-*Note: If `GEMINI_API_KEY` is not provided or the LLM is unreachable, the system automatically falls back to a deterministic rule-based NLP parser.*
+*Note: If `GEMINI_API_KEY` is not provided, FloatChat operates seamlessly in 100% offline mode.*
 
 ### Supported Query Language
 - **Regions**: `"Bay of Bengal"`, `"Arabian Sea"`

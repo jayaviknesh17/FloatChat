@@ -184,18 +184,19 @@ class NLQueryOutput(BaseModel):
     """Response payload for POST /api/v1/nl-query."""
 
     original_query: str
-    status: str = Field(..., description="Status: 'success', 'clarification_needed', or 'error'")
+    status: str = Field(..., description="Status: 'success', 'conversational', 'clarification_needed', or 'error'")
     interpreted_query: Optional[Dict[str, Any]] = Field(None, description="Validated QueryRequest dictionary if status is 'success'")
     filters_applied: List[str] = Field(default_factory=list, description="List of recognized scientific filters applied")
     clarification: Optional[str] = Field(None, description="Explanation or clarification prompt if input was ambiguous or invalid")
     confidence: float = Field(1.0, description="Confidence score of natural language parsing (0.0 to 1.0)")
+    conversational_response: Optional[str] = Field(None, description="Friendly conversational text or educational explanation when status is 'conversational'")
 
 
 class NLExecutionResponse(BaseModel):
     """Response payload for POST /api/v1/nl-query/execute."""
 
     original_query: str
-    status: str = Field(..., description="Status: 'success', 'clarification_needed', or 'error'")
+    status: str = Field(..., description="Status: 'success', 'conversational', 'clarification_needed', or 'error'")
     interpreted_query: Optional[Dict[str, Any]] = Field(None, description="Validated QueryRequest dictionary if status is 'success'")
     count: int = Field(0, description="Number of matching observation records returned")
     float_count: int = Field(0, description="Number of unique float platform numbers returned")
@@ -209,6 +210,8 @@ class NLExecutionResponse(BaseModel):
     total_latency_ms: float = Field(..., description="Total endpoint execution latency in ms")
     clarification: Optional[str] = Field(None, description="Clarification request prompt if query was ambiguous")
     confidence: float = Field(1.0, description="NL parsing confidence score")
+    conversational_response: Optional[str] = Field(None, description="Friendly conversational text or educational explanation when status is 'conversational'")
+
 
 
 
