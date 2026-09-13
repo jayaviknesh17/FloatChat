@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #030a17;
+  --foreground: #f8fafc;
+  --primary-cyan: #22d3ee;
+  --ocean-deep: #051226;
+  --ocean-surface: #0a254a;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  background-color: #030a17;
+  color: #f8fafc;
+  font-family: var(--font-sans), Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color-scheme: dark;
+}
+
+/* Custom Deep Ocean Glassmorphism matching reference image */
+.ocean-glass-sidebar {
+  background: linear-gradient(180deg, rgba(4, 18, 40, 0.65) 0%, rgba(2, 10, 26, 0.75) 100%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-right: 1px solid rgba(56, 189, 248, 0.16);
+  box-shadow: 4px 0 30px rgba(0, 0, 0, 0.45);
+}
+
+.ocean-glass-card {
+  background: rgba(4, 20, 44, 0.28);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ocean-glass-card:hover {
+  background: rgba(6, 28, 60, 0.42);
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 12px 36px rgba(6, 182, 212, 0.22), inset 0 0 14px rgba(34, 211, 238, 0.08);
+  transform: translateY(-2px);
+}
+
+.ocean-glass-input-container {
+  background: rgba(4, 20, 44, 0.38);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.45);
+}
+
+.ocean-chip {
+  background: rgba(6, 24, 52, 0.5);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+}
+
+.ocean-chip:hover,
+.ocean-chip.active {
+  background: rgba(14, 116, 144, 0.35);
+  border-color: rgba(34, 211, 238, 0.6);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.25);
+  color: #ffffff;
+}
+
+/* Glowing pulse dots */
+.glow-dot-cyan {
+  box-shadow: 0 0 10px #22d3ee, 0 0 18px rgba(34, 211, 238, 0.5);
+}
+
+.glow-dot-green {
+  box-shadow: 0 0 8px #4ade80, 0 0 16px rgba(74, 222, 128, 0.6);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(2, 8, 20, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.25);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.5);
+}
+
+/* Monospace font utility for scientific values */
+.font-mono-sci {
+  font-family: var(--font-mono), monospace;
+  letter-spacing: -0.01em;
+}

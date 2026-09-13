@@ -1,53 +1,38 @@
-# Byte-compiled / optimized / DLL files
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Next.js
+.next/
+**/.next/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Build output
+out/
+dist/
+
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-venv/
 .venv/
+venv/
 env/
-ENV/
 
-# Data files (do not commit raw binary NetCDF files or local sqlite/parquet)
-data/raw/*.nc
-data/raw/*_prof.nc
-data/processed/*.db
-data/processed/*.parquet
-!data/raw/.gitkeep
-!data/processed/.gitkeep
+# Data
+data/raw/
+data/processed/
+*.nc
+*.parquet
 
-# IDE & Editor files
+# IDE
 .vscode/
-.idea/
-*.swp
-*.swo
 
-# Testing & Coverage
+# Testing
 .pytest_cache/
-.coverage
-htmlcov/
 
 # Logs
 *.log
