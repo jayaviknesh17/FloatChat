@@ -1,26 +1,47 @@
 "use client";
 
 import React, { useState } from "react";
-import { ProfileLevel } from "@/lib/types";
+import { ProfileLevel, TemperatureProfilePoint, SalinityProfilePoint } from "@/lib/types";
 
 interface TSProfileChartProps {
-  levels: ProfileLevel[];
-  thermoclineDepth?: number;
+  levels?: ProfileLevel[];
+  temperatureProfile?: TemperatureProfilePoint[];
+  salinityProfile?: SalinityProfilePoint[];
+  thermoclineDepth?: number | null;
+  haloclineDepth?: number | null;
   highlightDepth?: number;
 }
 
 export default function TSProfileChart({
   levels,
-  thermoclineDepth = 65,
+  temperatureProfile,
+  salinityProfile,
+  thermoclineDepth,
+  haloclineDepth,
   highlightDepth,
 }: TSProfileChartProps) {
   const [activeMetric, setActiveMetric] = useState<"both" | "temperature" | "salinity">("both");
-  const [hoveredLevel, setHoveredLevel] = useState<ProfileLevel | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<{ depth: number; temp?: number; sal?: number } | null>(null);
 
-  if (!levels || levels.length === 0) {
+  // Normalize points from either backend profile analysis or legacy levels
+  const rawTempPoints: { depth: number; temp: number }[] =
+    temperatureProfile && temperatureProfile.length > 0
+      ? temperatureProfile.map((p) => ({ depth: p.depth_m, temp: p.temperature_c }))
+      : levels && levels.length > 0
+      ? levels.map((l) => ({ depth: l.depth, temp: l.temperature }))
+      : [];
+
+  const rawSalPoints: { depth: number; sal: number }[] =
+    salinityProfile && salinityProfile.length > 0
+      ? salinityProfile.map((p) => ({ depth: p.depth_m, sal: p.salinity_psu }))
+      : levels && levels.length > 0
+      ? levels.map((l) => ({ depth: l.depth, sal: l.salinity }))
+      : [];
+
+  if (rawTempPoints.length === 0 && rawSalPoints.length === 0) {
     return (
-      <div className="h-64 flex items-center justify-center text-xs text-slate-400">
-        No profile data available.
+      <div className="h-64 flex items-center justify-center text-xs text-slate-400 bg-[#041124]/90 rounded-xl border border-cyan-500/20">
+        No profile levels available.
       </div>
     );
   }
@@ -32,11 +53,11 @@ export default function TSProfileChart({
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
 
-  const minDepth = 0;
-  const maxDepth = Math.max(...levels.map((l) => l.depth), 2000);
+  const allDepths = [...rawTempPoints.map((p) => p.depth), ...rawSalPoints.map((p) => p.depth)];
+  const maxDepth = Math.max(...allDepths, 500);
 
   const minTemp = 0;
-  const maxTemp = 32;
+  const maxTemp = 35;
 
   const minSal = 30;
   const maxSal = 38;
@@ -44,27 +65,25 @@ export default function TSProfileChart({
   // Coordinate mappers
   const getY = (depth: number) => padding.top + (depth / maxDepth) * plotHeight;
   const getTempX = (temp: number) =>
-    padding.left + ((temp - minTemp) / (maxTemp - minTemp)) * plotWidth;
+    padding.left + (Math.max(0, Math.min(maxTemp, temp) - minTemp) / (maxTemp - minTemp)) * plotWidth;
   const getSalX = (sal: number) =>
-    padding.left + ((sal - minSal) / (maxSal - minSal)) * plotWidth;
+    padding.left + (Math.max(minSal, Math.min(maxSal, sal) - minSal) / (maxSal - minSal)) * plotWidth;
 
   // Generate SVG polyline path strings
-  const tempPoints = levels
-    .map((l) => `${getTempX(l.temperature)},${getY(l.depth)}`)
+  const tempPath = rawTempPoints
+    .map((l) => `${getTempX(l.temp)},${getY(l.depth)}`)
     .join(" ");
-  const salPoints = levels
-    .map((l) => `${getSalX(l.salinity)},${getY(l.depth)}`)
+  const salPath = rawSalPoints
+    .map((l) => `${getSalX(l.sal)},${getY(l.depth)}`)
     .join(" ");
 
   const depthTicks = [0, 200, 500, 1000, 1500, 2000].filter((d) => d <= maxDepth);
-  const tempTicks = [0, 10, 20, 30];
-  const salTicks = [30, 32, 34, 36, 38];
 
   return (
     <div className="p-4 rounded-xl bg-[#041124]/90 border border-cyan-500/20 shadow-inner">
       {/* Chart Top Controls & Legend */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2 text-xs">
           <button
             onClick={() => setActiveMetric("both")}
             className={`px-2.5 py-1 rounded-lg transition-colors ${
@@ -100,9 +119,11 @@ export default function TSProfileChart({
         </div>
 
         {/* Hovered Point Info */}
-        {hoveredLevel && (
+        {hoveredPoint && (
           <div className="text-[11px] font-mono-sci text-cyan-300 bg-cyan-950/70 px-2 py-0.5 rounded border border-cyan-500/30">
-            {hoveredLevel.depth}m | {hoveredLevel.temperature}°C | {hoveredLevel.salinity} PSU
+            {hoveredPoint.depth.toFixed(1)}m
+            {hoveredPoint.temp !== undefined && ` | ${hoveredPoint.temp.toFixed(2)}°C`}
+            {hoveredPoint.sal !== undefined && ` | ${hoveredPoint.sal.toFixed(2)} PSU`}
           </div>
         )}
       </div>
@@ -140,8 +161,8 @@ export default function TSProfileChart({
             );
           })}
 
-          {/* Thermocline Indicator Line */}
-          {thermoclineDepth && (
+          {/* Thermocline Reference Line */}
+          {thermoclineDepth !== undefined && thermoclineDepth !== null && (
             <g>
               <line
                 x1={padding.left}
@@ -160,15 +181,40 @@ export default function TSProfileChart({
                 fontWeight="bold"
                 fontFamily="monospace"
               >
-                Thermocline ({thermoclineDepth}m)
+                Thermocline ({thermoclineDepth.toFixed(0)}m)
               </text>
             </g>
           )}
 
-          {/* Temperature Curve */}
-          {(activeMetric === "both" || activeMetric === "temperature") && (
+          {/* Halocline Reference Line */}
+          {haloclineDepth !== undefined && haloclineDepth !== null && (
+            <g>
+              <line
+                x1={padding.left}
+                y1={getY(haloclineDepth)}
+                x2={width - padding.right}
+                y2={getY(haloclineDepth)}
+                stroke="#38bdf8"
+                strokeWidth="1.5"
+                strokeDasharray="2 2"
+              />
+              <text
+                x={width - padding.right + 4}
+                y={getY(haloclineDepth) + 12}
+                fill="#38bdf8"
+                fontSize="9"
+                fontWeight="bold"
+                fontFamily="monospace"
+              >
+                Halocline ({haloclineDepth.toFixed(0)}m)
+              </text>
+            </g>
+          )}
+
+          {/* Temperature Polyline */}
+          {(activeMetric === "both" || activeMetric === "temperature") && tempPath && (
             <polyline
-              points={tempPoints}
+              points={tempPath}
               fill="none"
               stroke="#f43f5e"
               strokeWidth="2.5"
@@ -178,10 +224,10 @@ export default function TSProfileChart({
             />
           )}
 
-          {/* Salinity Curve */}
-          {(activeMetric === "both" || activeMetric === "salinity") && (
+          {/* Salinity Polyline */}
+          {(activeMetric === "both" || activeMetric === "salinity") && salPath && (
             <polyline
-              points={salPoints}
+              points={salPath}
               fill="none"
               stroke="#22d3ee"
               strokeWidth="2.5"
@@ -191,40 +237,36 @@ export default function TSProfileChart({
             />
           )}
 
-          {/* Interactive Data Point Dots */}
-          {levels.map((l, idx) => {
-            const y = getY(l.depth);
-            const tempX = getTempX(l.temperature);
-            const salX = getSalX(l.salinity);
+          {/* Data Points (Sampled for responsiveness) */}
+          {rawTempPoints
+            .filter((_, i) => i % Math.max(1, Math.floor(rawTempPoints.length / 40)) === 0)
+            .map((p, idx) => (
+              <circle
+                key={`t-${idx}`}
+                cx={getTempX(p.temp)}
+                cy={getY(p.depth)}
+                r="3"
+                fill="#f43f5e"
+                className="hover:r-5 transition-all cursor-pointer"
+                onMouseEnter={() => setHoveredPoint({ depth: p.depth, temp: p.temp })}
+                onMouseLeave={() => setHoveredPoint(null)}
+              />
+            ))}
 
-            return (
-              <g
-                key={idx}
-                onMouseEnter={() => setHoveredLevel(l)}
-                onMouseLeave={() => setHoveredLevel(null)}
-                className="cursor-pointer group"
-              >
-                {(activeMetric === "both" || activeMetric === "temperature") && (
-                  <circle
-                    cx={tempX}
-                    cy={y}
-                    r="3.5"
-                    fill="#f43f5e"
-                    className="hover:r-5 transition-all"
-                  />
-                )}
-                {(activeMetric === "both" || activeMetric === "salinity") && (
-                  <circle
-                    cx={salX}
-                    cy={y}
-                    r="3.5"
-                    fill="#22d3ee"
-                    className="hover:r-5 transition-all"
-                  />
-                )}
-              </g>
-            );
-          })}
+          {rawSalPoints
+            .filter((_, i) => i % Math.max(1, Math.floor(rawSalPoints.length / 40)) === 0)
+            .map((p, idx) => (
+              <circle
+                key={`s-${idx}`}
+                cx={getSalX(p.sal)}
+                cy={getY(p.depth)}
+                r="3"
+                fill="#22d3ee"
+                className="hover:r-5 transition-all cursor-pointer"
+                onMouseEnter={() => setHoveredPoint({ depth: p.depth, sal: p.sal })}
+                onMouseLeave={() => setHoveredPoint(null)}
+              />
+            ))}
 
           {/* Axis Labels */}
           <text
@@ -235,7 +277,7 @@ export default function TSProfileChart({
             fontSize="10"
             fontFamily="system-ui"
           >
-            Temperature (°C) / Salinity (PSU)
+            Temperature (0–35°C) / Salinity (30–38 PSU)
           </text>
           <text
             x={14}

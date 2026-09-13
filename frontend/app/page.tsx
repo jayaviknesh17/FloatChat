@@ -16,10 +16,17 @@ import AboutModal from "@/components/modals/AboutModal";
 import SettingsModal from "@/components/modals/SettingsModal";
 import { ArgoFloat, AnomalyReport, DataProvenance, ChatMessage, SystemStatus } from "@/lib/types";
 import { getSystemStatus, submitOceanQuery } from "@/lib/api";
-import { MOCK_SYSTEM_STATUS } from "@/lib/mockArgoData";
 
 export default function Home() {
-  const [status, setStatus] = useState<SystemStatus>(MOCK_SYSTEM_STATUS);
+  const [status, setStatus] = useState<SystemStatus>({
+    isConnected: false,
+    isRealDataConnected: false,
+    floatCount: { total: 0, bayOfBengal: 0, arabianSea: 0 },
+    dataSourceLabel: "Connecting to FloatChat backend...",
+    statusBadgeLabel: "Connecting...",
+    sublabel: "Checking live ARGO data...",
+    activeMission: "Global Ocean Profiling Array",
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [recentQueries, setRecentQueries] = useState<string[]>([]);
@@ -132,7 +139,7 @@ export default function Home() {
         {/* Dynamic Center Content */}
         {messages.length === 0 ? (
           /* EXACT HOME VIEW (Identical to Reference Image) */
-          <div className="flex-1 flex flex-col justify-center max-w-4xl mx-auto w-full px-2 sm:px-6 py-1 overflow-y-auto scrollbar-none -mt-3">
+          <div className="flex-1 flex flex-col justify-center max-w-4xl mx-auto w-full px-4 sm:px-6 py-2 overflow-y-auto scrollbar-none">
             {/* Hero Section */}
             <HeroSection />
 

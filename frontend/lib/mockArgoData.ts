@@ -75,14 +75,14 @@ export const MOCK_SYSTEM_STATUS: SystemStatus = {
   isConnected: false,
   isRealDataConnected: false,
   floatCount: {
-    total: 38,
-    bayOfBengal: 20,
-    arabianSea: 18,
+    total: 0,
+    bayOfBengal: 0,
+    arabianSea: 0,
   },
-  lastUpdated: "Jul 2025",
-  dataSourceLabel: "Development Mode (Backend Offline)",
+  dataSourceLabel: "Demo data • UI preview",
   statusBadgeLabel: "Development Mode",
-  activeMission: "Global Ocean Profiling Array",
+  sublabel: "Backend offline",
+  activeMission: "Development preview",
 };
 
 export const MOCK_ARGO_FLOATS: ArgoFloat[] = [

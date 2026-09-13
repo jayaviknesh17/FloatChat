@@ -1,211 +1,388 @@
-import { ArgoFloat, SystemStatus, QueryResult, UnderstoodQuery, VisualizationType } from "./types";
-import { MOCK_ARGO_FLOATS, MOCK_SYSTEM_STATUS, PRESET_FEATURED_QUERIES } from "./mockArgoData";
+import {
+  FloatSummaryResponse,
+  TrajectoryResponse,
+  TrajectoryParams,
+  ProfileAnalysisResponse,
+  NLExecutionResponse,
+  SystemStatus,
+  QueryResult,
+  ArgoFloat,
+  UnderstoodQuery,
+  KeyValueMetric,
+  VisualizationType,
+} from "./types";
 
 const BACKEND_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 /**
- * Fetch data-driven system connection status
+ * 1. GET /api/v1/visualization/floats
+ * Retrieves lightweight float summary list for map markers, dropdowns, and stats.
+ */
+export async function getFloatVisualization(region?: string): Promise<FloatSummaryResponse> {
+  const url = new URL(`${BACKEND_API_URL}/api/v1/visualization/floats`);
+  if (region && region !== "All") {
+    const rClean = region.toLowerCase().replace(/\s+/g, "_");
+    url.searchParams.set("region", rClean);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch floats (HTTP ${res.status}): ${res.statusText}`);
+    }
+
+    const data: FloatSummaryResponse = await res.json();
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error("Request to FloatChat backend timed out after 8s.");
+    }
+    throw err;
+  }
+}
+
+/**
+ * 2. GET /api/v1/visualization/trajectory
+ * Retrieves real 3D/4D trajectory points for time-series / particle visualizations.
+ */
+export async function getTrajectory(params?: TrajectoryParams): Promise<TrajectoryResponse> {
+  const url = new URL(`${BACKEND_API_URL}/api/v1/visualization/trajectory`);
+
+  if (params?.region && params.region !== "All") {
+    url.searchParams.set("region", params.region.toLowerCase().replace(/\s+/g, "_"));
+  }
+  if (params?.start_date) url.searchParams.set("start_date", params.start_date);
+  if (params?.end_date) url.searchParams.set("end_date", params.end_date);
+  if (params?.float_id) url.searchParams.set("float_id", params.float_id);
+  if (params?.variable) url.searchParams.set("variable", params.variable.toLowerCase());
+  if (params?.limit) url.searchParams.set("limit", params.limit.toString());
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch trajectory (HTTP ${res.status}): ${res.statusText}`);
+    }
+
+    const data: TrajectoryResponse = await res.json();
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error("Trajectory request timed out after 12s.");
+    }
+    throw err;
+  }
+}
+
+/**
+ * 3. POST /api/v1/nl-query/execute
+ * Executes natural language queries against real ARGO dataset with statistical anomaly detection.
+ */
+export async function executeNLQuery(query: string): Promise<NLExecutionResponse> {
+  const url = `${BACKEND_API_URL}/api/v1/nl-query/execute`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(errorBody.detail || `Query failed with HTTP ${res.status}`);
+    }
+
+    const data: NLExecutionResponse = await res.json();
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error("Natural language query execution timed out after 15s.");
+    }
+    throw err;
+  }
+}
+
+/**
+ * 4. GET /api/v1/profile/{float_id}/analysis
+ * Retrieves real vertical temperature and salinity profiles, thermocline, and halocline analysis.
+ */
+export async function getFloatProfileAnalysis(
+  floatId: string,
+  cycleNumber?: number,
+  date?: string
+): Promise<ProfileAnalysisResponse> {
+  const url = new URL(`${BACKEND_API_URL}/api/v1/profile/${encodeURIComponent(floatId)}/analysis`);
+
+  if (cycleNumber !== undefined && cycleNumber !== null) {
+    url.searchParams.set("cycle_number", cycleNumber.toString());
+  }
+  if (date) {
+    url.searchParams.set("date", date);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      throw new Error(`Profile analysis not found for float ${floatId} (HTTP ${res.status})`);
+    }
+
+    const data: ProfileAnalysisResponse = await res.json();
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error(`Profile analysis for float ${floatId} timed out after 10s.`);
+    }
+    throw err;
+  }
+}
+
+/**
+ * 5. GET system status & live connection truthfulness
  */
 export async function getSystemStatus(): Promise<SystemStatus> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(`${BACKEND_API_URL}/status`, {
-      signal: controller.signal,
-      headers: { "Content-Type": "application/json" },
-    });
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    const [healthRes, floatsRes] = await Promise.all([
+      fetch(`${BACKEND_API_URL}/api/v1/health`, {
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+      }).catch(() => null),
+      fetch(`${BACKEND_API_URL}/api/v1/visualization/floats`, {
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+      }).catch(() => null),
+    ]);
     clearTimeout(timeoutId);
 
-    if (res.ok) {
-      const data = await res.json();
+    // 1. Live ARGO data successfully retrieved
+    if (floatsRes && floatsRes.ok) {
+      const data: FloatSummaryResponse = await floatsRes.json();
+      if (data && Array.isArray(data.floats) && data.floats.length > 0) {
+        const bobCount = data.floats.filter(
+          (f) => f.region === "Bay of Bengal" || f.region.toLowerCase().includes("bengal")
+        ).length;
+        const asCount = data.floats.filter(
+          (f) => f.region === "Arabian Sea" || f.region.toLowerCase().includes("arabian")
+        ).length;
+
+        const latestObs = data.floats
+          .map((f) => f.last_observation)
+          .filter(Boolean)
+          .sort()
+          .reverse()[0];
+
+        const formattedDate = latestObs ? latestObs.substring(0, 10) : undefined;
+
+        return {
+          isConnected: true,
+          isRealDataConnected: true,
+          floatCount: {
+            total: data.float_count || data.floats.length,
+            bayOfBengal: bobCount,
+            arabianSea: asCount,
+          },
+          lastUpdated: formattedDate,
+          dataSourceLabel: "Real ARGO Core NetCDF Profiles",
+          statusBadgeLabel: "Real ARGO Data",
+          sublabel: "Live Array",
+          activeMission: "Global Ocean Profiling Array",
+        };
+      }
+    }
+
+    // 2. Backend online but data empty/unavailable
+    if (healthRes && healthRes.ok) {
       return {
         isConnected: true,
-        isRealDataConnected: true,
-        floatCount: data.floatCount || { total: 38, bayOfBengal: 20, arabianSea: 18 },
-        lastUpdated: data.lastUpdated || "Live",
-        dataSourceLabel: data.dataSourceLabel || "Real ARGO data",
-        statusBadgeLabel: "Real ARGO Data",
-        activeMission: "Global Ocean Profiling Array",
+        isRealDataConnected: false,
+        isDataUnavailable: true,
+        floatCount: { total: 0, bayOfBengal: 0, arabianSea: 0 },
+        dataSourceLabel: "Development Mode · Data unavailable",
+        statusBadgeLabel: "Development Mode",
+        sublabel: "Data unavailable",
+        activeMission: "Development preview",
       };
     }
   } catch {
     // Backend offline
   }
 
+  // 3. Backend offline
   return {
-    ...MOCK_SYSTEM_STATUS,
+    isConnected: false,
     isRealDataConnected: false,
+    floatCount: { total: 0, bayOfBengal: 0, arabianSea: 0 },
+    dataSourceLabel: "Backend offline",
     statusBadgeLabel: "Development Mode",
-    dataSourceLabel: "Development mode — backend unavailable",
+    sublabel: "Backend offline",
+    activeMission: "Development preview",
   };
 }
 
 /**
- * Submit natural language question to POST /query
+ * 6. High-level submitOceanQuery:
+ * Bridges Chat UI directly with POST /api/v1/nl-query/execute
  */
 export async function submitOceanQuery(
   query: string,
   selectedFilters?: string[]
 ): Promise<QueryResult> {
-  // Check if query matches one of our preset featured queries
-  const matchedPreset = PRESET_FEATURED_QUERIES.find(
-    (p) =>
-      p.query.toLowerCase().trim() === query.toLowerCase().trim() ||
-      query.toLowerCase().includes(p.id) ||
-      (selectedFilters && selectedFilters.includes(p.title))
-  );
+  // Execute real backend query
+  const nlResponse = await executeNLQuery(query);
 
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-    const res = await fetch(`${BACKEND_API_URL}/query`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query,
-        filters: selectedFilters || [],
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (res.ok) {
-      const liveData = await res.json();
-      return liveData;
-    }
-  } catch {
-    // Fallback to structured parsing if backend is pending integration
-  }
-
-  // Parse natural language structured understanding
-  const lower = query.toLowerCase();
-  let region = "Bay of Bengal & Arabian Sea";
-  if (lower.includes("bay of bengal") || (selectedFilters && selectedFilters.includes("Bay of Bengal"))) {
-    region = "Bay of Bengal";
-  } else if (lower.includes("arabian sea") || (selectedFilters && selectedFilters.includes("Arabian Sea"))) {
-    region = "Arabian Sea";
-  } else if (lower.includes("andaman")) {
-    region = "Bay of Bengal (Andaman Basin)";
-  }
-
-  let variable = "Temperature & Salinity";
-  let vizType: VisualizationType = "ocean-3d";
-
-  if (lower.includes("temp") || (selectedFilters && selectedFilters.includes("Temperature"))) {
-    variable = "Temperature";
-    vizType = lower.includes("anomal") ? "ocean-3d" : "ts-profile";
-  } else if (lower.includes("salin") || (selectedFilters && selectedFilters.includes("Salinity"))) {
-    variable = "Salinity";
-    vizType = "ts-profile";
-  } else if (lower.includes("thermocline") || lower.includes("mld")) {
-    variable = "Thermocline Depth";
-    vizType = "ts-profile";
-  } else if (lower.includes("heatwave") || lower.includes("mhw")) {
-    variable = "Marine Heatwaves (MHW)";
-    vizType = "ocean-3d";
-  } else if (lower.includes("traject") || (selectedFilters && selectedFilters.includes("Float Trajectories"))) {
-    variable = "Float Trajectories";
-    vizType = "ocean-3d";
-  }
-
-  let depth = "0–2000m";
-  if (lower.includes("500")) depth = "0–500m";
-  else if (lower.includes("300")) depth = "0–300m";
-  else if (lower.includes("100")) depth = "0–100m";
-  else if (lower.includes("surface")) depth = "0–50m";
-
-  let period = "2024–2025";
-  if (lower.includes("6 months")) period = "Last 6 Months (Jan–Jul 2025)";
-  else if (lower.includes("summer")) period = "Summer 2025";
-  else if (lower.includes("2 years")) period = "2023–2025";
-
-  let analysis = "Oceanographic Analysis";
-  if (lower.includes("anomal") || (selectedFilters && selectedFilters.includes("Anomalies"))) analysis = "Anomaly Detection";
-  else if (lower.includes("profile") || lower.includes("plot")) analysis = "Vertical CTD Profile";
-  else if (lower.includes("where") || lower.includes("depth")) analysis = "Layer Depth & Gradient";
-
-  const understood: UnderstoodQuery = matchedPreset?.understood || {
-    originalQuery: query,
-    region,
-    variable,
-    depth,
-    period,
-    analysis,
+  const understoodQuery: UnderstoodQuery = {
+    originalQuery: nlResponse.original_query,
+    region: nlResponse.interpreted_query?.region || nlResponse.provenance?.region || "Northern Indian Ocean",
+    variable: nlResponse.interpreted_query?.variable || (nlResponse.variables?.join(", ") || "Temperature & Salinity"),
+    depth:
+      nlResponse.interpreted_query?.depth_max !== undefined && nlResponse.interpreted_query?.depth_max !== 12000
+        ? `${nlResponse.interpreted_query?.depth_min || 0}–${nlResponse.interpreted_query?.depth_max}m`
+        : "0–2000m (Full Column)",
+    period:
+      nlResponse.date_range?.start && nlResponse.date_range?.end
+        ? `${nlResponse.date_range.start.substring(0, 10)} to ${nlResponse.date_range.end.substring(0, 10)}`
+        : "All Observation Cycles",
+    analysis: nlResponse.interpreted_query?.analysis || "Real ARGO Profile Analysis",
   };
 
-  if (matchedPreset) {
-    return {
-      queryId: `query_${Date.now()}`,
-      queryText: query,
-      understood,
-      summary: matchedPreset.sampleResult.summary,
-      keyValues: matchedPreset.sampleResult.keyValues,
-      interpretation: matchedPreset.sampleResult.interpretation,
-      visualizationType: matchedPreset.sampleResult.visualizationType,
-      matchedFloats: MOCK_ARGO_FLOATS.filter(
-        (f) =>
-          f.region === matchedPreset.understood.region ||
-          matchedPreset.understood.region.includes(f.region)
-      ),
-      provenance: matchedPreset.sampleResult.provenance,
-      timestamp: new Date().toISOString(),
-    };
+  // Build scientific summary from real results
+  let summaryText = "";
+  if (nlResponse.status === "clarification_needed" && nlResponse.clarification) {
+    summaryText = nlResponse.clarification;
+  } else if (nlResponse.count === 0) {
+    summaryText = `No real ARGO observation records matched the query criteria across the specified region and depth interval.`;
+  } else {
+    summaryText = `Retrieved ${nlResponse.count.toLocaleString()} real ARGO observation records across ${nlResponse.float_count} float platform(s) in the ${understoodQuery.region}.`;
+    if (nlResponse.anomaly_summary && (nlResponse.anomaly_summary.anomaly_count ?? 0) > 0) {
+      summaryText += ` Detected ${nlResponse.anomaly_summary.anomaly_count} statistical anomalies (${nlResponse.anomaly_summary.anomaly_percentage?.toFixed(1)}% of sampled levels) exceeding ${nlResponse.anomaly_summary.threshold_z || 2.0}σ threshold.`;
+    }
   }
 
-  // Dynamic scientific synthesis for other queries
-  const relevantFloats = MOCK_ARGO_FLOATS.filter((f) =>
-    region.includes(f.region) || f.region.includes(region) || region.includes("&")
-  );
-  const primaryFloat = relevantFloats[0] || MOCK_ARGO_FLOATS[0];
+  // Key Value Metrics extracted directly from real response
+  const keyValues: KeyValueMetric[] = [
+    { label: "Target Region", value: understoodQuery.region },
+    { label: "Target Variable", value: understoodQuery.variable },
+    { label: "Observations", value: nlResponse.count.toLocaleString(), unit: "records" },
+    { label: "Floats Represented", value: `${nlResponse.float_count}`, unit: "floats" },
+    { label: "Execution Latency", value: `${nlResponse.total_latency_ms.toFixed(1)}`, unit: "ms" },
+  ];
+
+  if (nlResponse.anomaly_summary && (nlResponse.anomaly_summary.anomaly_count ?? 0) > 0) {
+    keyValues.push({
+      label: "Max |Z-Score|",
+      value: `+${(nlResponse.anomaly_summary.max_abs_z_score || 0).toFixed(2)}σ`,
+      isAnomaly: true,
+    });
+  }
+
+  // Map real results into matchedFloats items for UI selection
+  const uniqueFloatIds = Array.from(new Set(nlResponse.results.map((r) => r.float_id)));
+  const matchedFloats: ArgoFloat[] = uniqueFloatIds.slice(0, 10).map((fid) => {
+    const floatRecords = nlResponse.results.filter((r) => r.float_id === fid);
+    const firstRec = floatRecords[0];
+    const hasAnomaly = floatRecords.some((r) => r.is_anomaly);
+    const anomalyRec = floatRecords.find((r) => r.is_anomaly);
+
+    return {
+      id: fid,
+      name: `ARGO Float ${fid} (${firstRec.region})`,
+      wmo: fid,
+      region: firstRec.region as any,
+      lat: firstRec.latitude,
+      lon: firstRec.longitude,
+      status: "active",
+      lastCycle: firstRec.cycle_number,
+      lastDate: firstRec.profile_time.substring(0, 10),
+      dac: "ARGO GDAC",
+      platformType: "Core CTD Profiler",
+      sensorTypes: ["Pressure", "Temperature", "Salinity"],
+      netcdfSource: firstRec.source_file || `${fid}_prof.nc`,
+      currentAnomaly: hasAnomaly && anomalyRec
+        ? {
+            isAnomalous: true,
+            variable: "Temperature",
+            observedValue: anomalyRec.temperature_c || 0,
+            baselineValue: 0,
+            anomalyDelta: 0,
+            zScore: anomalyRec.z_score || 2.0,
+            severity: "significant",
+            statusLabel: "Statistical Anomaly Detected",
+            depthLevel: `${anomalyRec.depth_m.toFixed(0)}m`,
+            description: `Observation at depth ${anomalyRec.depth_m.toFixed(1)}m exhibits a Z-Score of ${anomalyRec.z_score?.toFixed(2)}σ relative to regional baseline.`,
+            floatId: fid,
+            cycle: anomalyRec.cycle_number,
+            date: anomalyRec.profile_time.substring(0, 10),
+          }
+        : undefined,
+    };
+  });
+
+  const firstRec = nlResponse.results[0];
 
   return {
     queryId: `query_${Date.now()}`,
     queryText: query,
-    understood,
-    summary: `Analyzed ${variable.toLowerCase()} across ${region} using active ARGO Core profiling records for ${period}.`,
-    keyValues: [
-      { label: "Target Region", value: region },
-      { label: "Variable", value: variable },
-      { label: "Depth Interval", value: depth },
-      { label: "Profiles Sampled", value: `${relevantFloats.length}`, unit: "floats" },
-      { label: "Data Quality Flag", value: "QC Flag 1" },
-    ],
+    understood: understoodQuery,
+    summary: summaryText,
+    keyValues,
     interpretation: [
-      `Computed vertical distribution across ${depth} depth interval using TEOS-10 equation of state.`,
-      `Observational data retrieved from ${relevantFloats.length} high-resolution CTD profiles in the basin.`,
-      `Vertical stratification shows consistent seasonal monsoon dynamics.`,
+      `Observations retrieved directly from real ARGO multi-profile NetCDF archive via parameterized SQLite queries.`,
+      `Quality control filter retained only flags 1 (Good) and 2 (Probably Good).`,
+      `Total backend latency: ${nlResponse.total_latency_ms.toFixed(2)} ms (SQLite DB: ${nlResponse.sqlite_db_latency_ms.toFixed(2)} ms).`,
     ],
-    visualizationType: vizType,
-    matchedFloats: relevantFloats,
+    visualizationType: nlResponse.results.length > 0 ? "ts-profile" : "none",
+    matchedFloats,
     provenance: {
-      floatId: primaryFloat.id,
-      cycle: primaryFloat.lastCycle,
-      date: primaryFloat.lastDate,
-      location: `${primaryFloat.region} (${primaryFloat.lat}°N, ${primaryFloat.lon}°E)`,
-      depth: depth,
-      source: `ARGO Core NetCDF (${primaryFloat.netcdfSource})`,
-      dac: primaryFloat.dac,
-      qcStatus: "QC Flag 1 (Good Data)",
+      floatId: firstRec?.float_id || (nlResponse.provenance?.float_ids?.[0] || "Array"),
+      cycle: firstRec?.cycle_number || 1,
+      date: firstRec?.profile_time || new Date().toISOString(),
+      location: firstRec
+        ? `${firstRec.region} (${firstRec.latitude.toFixed(2)}°N, ${firstRec.longitude.toFixed(2)}°E)`
+        : understoodQuery.region,
+      depth: understoodQuery.depth,
+      source: nlResponse.provenance?.source_type || "Real ARGO NetCDF (*.nc) via SQLite",
+      dac: "ARGO GDAC",
+      qcStatus: "QC Flag 1 & 2 (Validated)",
     },
     timestamp: new Date().toISOString(),
+    nlResponse,
   };
-}
-
-/**
- * Get all available ARGO floats
- */
-export async function getArgoFloats(): Promise<ArgoFloat[]> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(`${BACKEND_API_URL}/floats`, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    if (res.ok) {
-      return await res.json();
-    }
-  } catch {
-    // Fallback to development data
-  }
-  return MOCK_ARGO_FLOATS;
 }

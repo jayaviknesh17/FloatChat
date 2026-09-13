@@ -4,7 +4,6 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { QueryResult, ArgoFloat } from "@/lib/types";
 import TSProfileChart from "../charts/TSProfileChart";
-import Ocean3DCanvas from "../explorer/Ocean3DCanvas";
 import {
   Sparkles,
   ChevronDown,
@@ -21,12 +20,13 @@ import {
   ShieldCheck,
   CheckCircle2,
   AlertTriangle,
+  Flame,
 } from "lucide-react";
 
 interface FloatChatMessageProps {
   result: QueryResult;
-  onSelectFloat: (argoFloat: ArgoFloat) => void;
-  onOpenEvidence: (argoFloat: ArgoFloat) => void;
+  onSelectFloat: (argoFloat: any) => void;
+  onOpenEvidence: (argoFloat: any) => void;
 }
 
 export default function FloatChatMessage({
@@ -35,10 +35,28 @@ export default function FloatChatMessage({
   onOpenEvidence,
 }: FloatChatMessageProps) {
   const [showUnderstood, setShowUnderstood] = useState(false);
-  const [showEvidence, setShowEvidence] = useState(false);
-  const [depthSlice, setDepthSlice] = useState(0);
+  const primaryFloat = result.matchedFloats?.[0];
+  const nlResponse = result.nlResponse;
 
-  const primaryFloat = result.matchedFloats[0];
+  // Extract observation profile points for inline chart if available
+  const obsResults = nlResponse?.results || [];
+  const tempProfile = obsResults
+    .filter((r) => r.temperature_c !== null && r.temperature_c !== undefined)
+    .map((r) => ({
+      depth_m: r.depth_m,
+      temperature_c: r.temperature_c as number,
+      temp_qc: r.temp_qc || "1",
+    }));
+
+  const salProfile = obsResults
+    .filter((r) => r.salinity_psu !== null && r.salinity_psu !== undefined)
+    .map((r) => ({
+      depth_m: r.depth_m,
+      salinity_psu: r.salinity_psu as number,
+      psal_qc: r.psal_qc || "1",
+    }));
+
+  const hasChartData = tempProfile.length > 0 || salProfile.length > 0;
 
   return (
     <div className="flex items-start gap-3 my-4 pr-4 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -54,7 +72,7 @@ export default function FloatChatMessage({
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <path d="M2 12c4-4 8 4 12 0 4-4 8 4 12 0" />
+            <path d="M2 12c4-4 8 4 12 0" />
             <path d="M2 17c4-4 8 4 12 0 4-4 8 4 12 0" opacity="0.6" />
           </svg>
         </div>
@@ -62,16 +80,16 @@ export default function FloatChatMessage({
 
       {/* Message Content Body */}
       <div className="flex-1 min-w-0 space-y-3.5">
-        {/* Header: FloatChat Label + Timestamp + Compact Understood Query Toggle */}
+        {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-white tracking-tight">FloatChat</span>
             <span className="text-[10px] text-cyan-400/80 font-mono-sci px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/20">
-              ARGO Core
+              Real ARGO Core
             </span>
           </div>
 
-          {/* Compact Understood Query Toggle Pill */}
+          {/* Understood Query Toggle */}
           <button
             onClick={() => setShowUnderstood(!showUnderstood)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#061c38]/80 hover:bg-[#0a2850] border border-cyan-500/25 text-[11px] font-medium text-cyan-300 transition-colors"
@@ -82,7 +100,7 @@ export default function FloatChatMessage({
           </button>
         </div>
 
-        {/* Expandable Understood Query Compact Breakdown */}
+        {/* Understood Query Breakdown */}
         {showUnderstood && (
           <div className="p-3 rounded-xl bg-[#04142d]/90 border border-cyan-500/20 text-xs animate-in fade-in duration-150">
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
@@ -110,19 +128,34 @@ export default function FloatChatMessage({
           </div>
         )}
 
-        {/* 1. SHORT SUMMARY / CONCLUSION */}
+        {/* 1. Real Summary Text */}
         <div className="text-sm font-medium text-slate-100 leading-relaxed bg-[#051833]/60 p-3.5 rounded-xl border border-cyan-500/15">
           {result.summary}
         </div>
 
-        {/* 2. COMPACT SCIENTIFIC KEY VALUES TABLE */}
+        {/* Anomaly Badge if Present */}
+        {nlResponse?.anomaly_summary && (nlResponse.anomaly_summary.anomaly_count || 0) > 0 && (
+          <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Flame className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+              <span className="text-amber-200">
+                <strong>{nlResponse.anomaly_summary.anomaly_count} Anomalous Observations</strong> detected ({nlResponse.anomaly_summary.anomaly_percentage?.toFixed(1)}% of sampled levels)
+              </span>
+            </div>
+            <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono-sci font-bold">
+              Max |Z| = +{(nlResponse.anomaly_summary.max_abs_z_score || 0).toFixed(2)}σ
+            </span>
+          </div>
+        )}
+
+        {/* 2. Key Values Table */}
         {result.keyValues && result.keyValues.length > 0 && (
           <div className="rounded-xl border border-cyan-500/20 bg-[#041228]/80 overflow-hidden">
             <div className="px-3 py-1.5 bg-[#071d3a]/70 border-b border-cyan-500/15 flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300 font-mono-sci">
                 Key Values
               </span>
-              <span className="text-[10px] text-slate-400 font-mono-sci">TEOS-10 Standard</span>
+              <span className="text-[10px] text-slate-400 font-mono-sci">Real ARGO NetCDF Observations</span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-cyan-500/10 text-xs">
@@ -147,62 +180,36 @@ export default function FloatChatMessage({
           </div>
         )}
 
-        {/* 3. INLINE EMBEDDED VISUALIZATION */}
-        {result.visualizationType === "ts-profile" && primaryFloat?.profiles?.[0] && (
+        {/* 3. Inline CTD Profile Chart from Real Observations */}
+        {hasChartData && (
           <div className="space-y-1.5 pt-1">
             <div className="flex items-center justify-between px-1">
               <span className="text-[11px] font-semibold text-cyan-300 flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5" />
-                Vertical CTD Profile — WMO {primaryFloat.wmo}
+                Observation Profile ({obsResults.length} records)
               </span>
-              <button
-                onClick={() => onSelectFloat(primaryFloat)}
-                className="text-[11px] text-cyan-400 hover:text-cyan-200 underline font-mono-sci"
-              >
-                Inspect Data Layers
-              </button>
+              {primaryFloat && (
+                <button
+                  onClick={() => onSelectFloat(primaryFloat)}
+                  className="text-[11px] text-cyan-400 hover:text-cyan-200 underline font-mono-sci"
+                >
+                  Inspect Float #{primaryFloat.wmo}
+                </button>
+              )}
             </div>
+
             <TSProfileChart
-              levels={primaryFloat.profiles[0].levels}
-              thermoclineDepth={65}
+              temperatureProfile={tempProfile}
+              salinityProfile={salProfile}
             />
           </div>
         )}
 
-        {result.visualizationType === "ocean-3d" && result.matchedFloats.length > 0 && (
-          <div className="space-y-1.5 pt-1">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] font-semibold text-cyan-300 flex items-center gap-1.5">
-                <Compass className="w-3.5 h-3.5" />
-                4D Ocean Visualization ({result.matchedFloats.length} Floats in Region)
-              </span>
-              <Link
-                href="/explorer"
-                className="text-[11px] text-cyan-400 hover:text-cyan-200 flex items-center gap-1 font-mono-sci"
-              >
-                <span>Fullscreen 4D</span>
-                <ExternalLink className="w-3 h-3" />
-              </Link>
-            </div>
-
-            <div className="h-64 sm:h-72 rounded-2xl overflow-hidden border border-cyan-500/25 relative bg-[#020a17]">
-              <Ocean3DCanvas
-                floats={result.matchedFloats}
-                selectedFloat={null}
-                onSelectFloat={(af) => onSelectFloat(af)}
-                selectedRegion="All"
-                selectedDepth={depthSlice}
-                selectedCycleTime={100}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* 4. CONCISE SCIENTIFIC INTERPRETATION (3-5 Bullet Points) */}
+        {/* 4. Scientific Interpretation */}
         {result.interpretation && result.interpretation.length > 0 && (
           <div className="space-y-1.5 pt-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-400 block">
-              Interpretation
+            <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-400 block font-mono-sci">
+              Data Provenance & Interpretation
             </span>
             <ul className="space-y-1 text-xs text-slate-200 pl-3 leading-relaxed">
               {result.interpretation.map((point, idx) => (
@@ -214,9 +221,8 @@ export default function FloatChatMessage({
           </div>
         )}
 
-        {/* 5. DATA EVIDENCE & ACTIONS */}
+        {/* 5. Provenance & Action Buttons */}
         <div className="pt-2 border-t border-cyan-500/15 flex flex-wrap items-center justify-between gap-2">
-          {/* Action buttons */}
           <div className="flex items-center gap-2">
             {primaryFloat && (
               <button
@@ -224,21 +230,21 @@ export default function FloatChatMessage({
                 className="px-3 py-1.5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/30 text-xs font-semibold text-cyan-200 flex items-center gap-1.5 transition-colors"
               >
                 <Radio className="w-3.5 h-3.5 text-cyan-400" />
-                <span>View Float #{primaryFloat.wmo}</span>
+                <span>Inspect Float #{primaryFloat.wmo}</span>
               </button>
             )}
 
             <button
-              onClick={() => onOpenEvidence(primaryFloat || result.matchedFloats[0])}
+              onClick={() => onOpenEvidence(primaryFloat || result.matchedFloats?.[0])}
               className="px-3 py-1.5 rounded-xl bg-[#061730] hover:bg-[#0a274d] border border-cyan-500/20 text-xs font-medium text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors"
             >
               <FileCode className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Data Evidence</span>
+              <span>Data Provenance</span>
             </button>
           </div>
 
           <span className="text-[10px] text-slate-400 font-mono-sci">
-            QC: Flag 1 (Good Data) • NetCDF
+            QC Flag 1 & 2 • {nlResponse ? `${nlResponse.total_latency_ms.toFixed(1)} ms` : "Live"}
           </span>
         </div>
       </div>
