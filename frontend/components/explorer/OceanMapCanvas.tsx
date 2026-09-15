@@ -12,6 +12,7 @@ interface OceanMapCanvasProps {
   selectedRegion?: OceanRegion | "All";
   isRealDataConnected?: boolean;
   isLoading?: boolean;
+  isTrajectoryLoading?: boolean;
   error?: string | null;
   trajectories?: TrajectoryPoint[];
 }
@@ -24,6 +25,7 @@ export default function OceanMapCanvas({
   selectedRegion = "All",
   isRealDataConnected = false,
   isLoading = false,
+  isTrajectoryLoading = false,
   error = null,
   trajectories = [],
 }: OceanMapCanvasProps) {
@@ -51,6 +53,20 @@ export default function OceanMapCanvas({
       setImageLoaded(true);
     };
   }, []);
+
+  // Auto-focus viewport based on selected region
+  useEffect(() => {
+    if (selectedRegion === "Bay of Bengal") {
+      setZoom(1.65);
+      setPan({ x: -110, y: 70 });
+    } else if (selectedRegion === "Arabian Sea") {
+      setZoom(1.65);
+      setPan({ x: 130, y: 70 });
+    } else if (selectedRegion === "Indian Ocean" || selectedRegion === "All") {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    }
+  }, [selectedRegion]);
 
   // Center / Reset View
   const handleResetView = useCallback(() => {
@@ -124,15 +140,21 @@ export default function OceanMapCanvas({
         ctx.fillRect(0, 0, width, height);
       }
 
-      // 2. Layer Overlays (Temperature Heatmap or Salinity Tint)
-      if (mapLayer === "temperature") {
+      // 2. Layer Overlays (Temperature Heatmap, Salinity Tint, or Manual Layer)
+      const effectiveLayer = (selectedVariable === "Temperature" || selectedVariable === "Marine Heatwaves")
+        ? "temperature"
+        : selectedVariable === "Salinity"
+        ? "salinity"
+        : mapLayer;
+
+      if (effectiveLayer === "temperature") {
         const tempGrad = ctx.createRadialGradient(width * 0.52, height * 0.35, 20, width * 0.52, height * 0.35, width * 0.45);
         tempGrad.addColorStop(0, "rgba(244, 63, 94, 0.28)");
         tempGrad.addColorStop(0.5, "rgba(251, 146, 60, 0.18)");
         tempGrad.addColorStop(1, "rgba(56, 189, 248, 0.05)");
         ctx.fillStyle = tempGrad;
         ctx.fillRect(0, 0, width, height);
-      } else if (mapLayer === "salinity") {
+      } else if (effectiveLayer === "salinity") {
         const salGrad = ctx.createRadialGradient(width * 0.38, height * 0.32, 20, width * 0.38, height * 0.32, width * 0.4);
         salGrad.addColorStop(0, "rgba(34, 211, 238, 0.32)");
         salGrad.addColorStop(0.6, "rgba(14, 165, 233, 0.15)");
@@ -332,6 +354,14 @@ export default function OceanMapCanvas({
         <div className="absolute inset-0 bg-[#030d1d]/70 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-30 pointer-events-none">
           <Loader2 className="w-7 h-7 text-cyan-400 animate-spin" />
           <span className="text-xs font-mono-sci text-cyan-300">Loading real ARGO float array...</span>
+        </div>
+      )}
+
+      {/* Trajectory Loading Overlay */}
+      {isTrajectoryLoading && !isLoading && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-[#041733]/90 border border-cyan-400/50 shadow-2xl flex items-center gap-2 z-30 backdrop-blur-md">
+          <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
+          <span className="text-xs font-mono-sci text-cyan-200">Querying real float trajectories from GDAC...</span>
         </div>
       )}
 

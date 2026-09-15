@@ -386,7 +386,88 @@ class QueryService:
             processing_qc_notes="Only QC flags 1 (Good) and 2 (Probably Good) retained. Depth derived via hydrostatic approximation depth_m ~ pressure_dbar."
         )
 
-    def execute_nl_query(self, query_text: str) -> NLExecutionResponse:
+    def _build_nl_summary(
+        self,
+        query_text: str,
+        req: QueryRequest,
+        count: int,
+        float_count: int,
+        anomaly_summary: Optional[Dict[str, Any]],
+        lang: str = "en"
+    ) -> str:
+        """Generate humanized natural language response summary in user's language without altering scientific values."""
+        from backend.app.services.nl_query_service import NLQueryService
+        nl_service = NLQueryService()
+
+        # 1. Zero observations found
+        if count == 0:
+            if lang == "ta":
+                return "Indha query-ku matching ARGO observations கிடைக்கவில்லை 🌊. Region, date range, depth, or variable-ai maatri paarrunga."
+            elif lang == "hi":
+                return "Is query ke liye matching ARGO observations nahi mile 🌊. Region, date range, depth ya variable बदलकर dekhein."
+            else:
+                return "I couldn't find matching ARGO observations for that query 🌊. Try changing the region, date range, depth, or variable."
+
+        # 2. Try Gemini scientific summary generation if enabled
+        has_anomalies = (
+            req.analysis == "anomaly" or
+            (anomaly_summary is not None and isinstance(anomaly_summary, dict) and anomaly_summary.get("anomaly_count", 0) > 0)
+        )
+
+        facts = {
+            "query": query_text,
+            "count": count,
+            "float_count": float_count,
+            "region": req.region or "Bay of Bengal / Arabian Sea",
+            "variable": req.variable or "both",
+            "float_id": req.float_id,
+            "cycle_number": req.cycle_number,
+            "has_anomalies": has_anomalies,
+            "anomaly_details": anomaly_summary if has_anomalies else None
+        }
+
+        try:
+            gemini_summary = nl_service.generate_gemini_scientific_summary(query_text, facts, lang)
+            if gemini_summary:
+                return gemini_summary
+        except Exception as e:
+            logger.warning(f"Gemini summary generation failed: {e}. Using natural offline template.")
+
+        # 3. Upgraded Natural Offline Summary Fallback
+        if has_anomalies:
+            if lang == "ta":
+                return "Indha ARGO observations-la temperature anomaly detect panni irukken 🌊. Strongest anomaly-oda depth, temperature, baseline, and z-score keela kaati irukken."
+            elif lang == "hi":
+                return "In ARGO observations mein temperature anomaly milli hai 🌊. Sabse strong anomaly ki depth, temperature, baseline aur z-score neeche diye gaye hain."
+            else:
+                return "I found a temperature anomaly in the selected ARGO observations 🌊. The strongest detected anomaly is shown below with its depth, temperature, baseline and z-score."
+
+        region_str = req.region or "the ocean"
+        count_fmt = f"{count:,}"
+
+        if req.region:
+            if lang == "ta":
+                return f"Sure da 🌊 {region_str}-oda real ARGO data eduthuten.\n\n{count_fmt} observations கிடைச்சிருக்கு from {float_count} float(s). Keela irukkura profile-la depth-ku values eppadi change aagudhu nu paakalaam.\n\nVenumna next, anomaly irukka-nu check pannalaam."
+            elif lang == "hi":
+                return f"Bilkul 🌊 {region_str} ka real ARGO data mil gaya.\n\nIs result mein {count_fmt} observations from {float_count} float(s) hain. Neeche profile mein depth ke saath values kaise change hoti hain woh dekh sakte ho.\n\nAgar chaho toh main anomalies bhi check kar sakta hoon."
+            else:
+                return f"Sure 🌊 I pulled the real ARGO observations for the {region_str}.\n\nI found {count_fmt} observations across {float_count} float(s) in the selected data. The profile is ready below so you can see how it changes with depth.\n\nWant me to check this data for temperature anomalies next?"
+        elif req.float_id:
+            if lang == "ta":
+                return f"Sure da 🌊 Float {req.float_id}-oda real ARGO observations eduthuten.\n\n{count_fmt} observations கிடைச்சிருக்கு. Keela irukkura profile-la detailed levels paakalaam."
+            elif lang == "hi":
+                return f"Bilkul 🌊 Float {req.float_id} ke real ARGO observations mil gaye.\n\n{count_fmt} observations hain. Neeche profile mein detailed levels dekh sakte ho."
+            else:
+                return f"Sure 🌊 I pulled {count_fmt} real ARGO observations for float {req.float_id}. You can inspect the detailed profile levels below."
+        else:
+            if lang == "ta":
+                return f"Sure da 🌊 {float_count} floats-oda {count_fmt} real ARGO observations eduthuten. Keela profile data-va explore pannalaam."
+            elif lang == "hi":
+                return f"Bilkul 🌊 {float_count} floats se {count_fmt} real ARGO observations mil gaye. Neeche profile data explore kar sakte ho."
+            else:
+                return f"Sure 🌊 I found {count_fmt} real ARGO observations across {float_count} floats. Explore the profile data below."
+
+    def execute_nl_query(self, query_text: str, history: Optional[List[Dict[str, str]]] = None) -> NLExecutionResponse:
         """
         Parse natural language query and execute ONLY through the parameterized QueryService database layer.
         Does NOT execute arbitrary LLM-generated SQL.
@@ -395,7 +476,8 @@ class QueryService:
         from backend.app.services.nl_query_service import NLQueryService
 
         nl_service = NLQueryService()
-        parsed = nl_service.parse_query(query_text)
+        parsed = nl_service.parse_query(query_text, history=history)
+        lang = parsed.response_language or "en"
 
         # Handle conversational queries, clarification needed, or parsing errors
         if parsed.status != "success" or not parsed.interpreted_query:
@@ -422,7 +504,8 @@ class QueryService:
                 total_latency_ms=round((end_total - start_total) * 1000, 3),
                 clarification=parsed.clarification,
                 confidence=parsed.confidence,
-                conversational_response=parsed.conversational_response
+                conversational_response=parsed.conversational_response,
+                response_language=lang
             )
 
         # Build validated QueryRequest
@@ -468,6 +551,16 @@ class QueryService:
             variable=req.variable
         )
 
+        # Generate humanized conversational response summary
+        conv_summary = self._build_nl_summary(
+            query_text=query_text,
+            req=req,
+            count=len(enriched_results),
+            float_count=len(float_ids_set),
+            anomaly_summary=anomaly_summary,
+            lang=lang
+        )
+
         end_total = time.perf_counter()
         total_latency = round((end_total - start_total) * 1000, 3)
 
@@ -486,7 +579,9 @@ class QueryService:
             sqlite_db_latency_ms=query_resp.sqlite_db_latency_ms,
             total_latency_ms=total_latency,
             clarification=None,
-            confidence=parsed.confidence
+            confidence=parsed.confidence,
+            conversational_response=conv_summary,
+            response_language=lang
         )
 
 

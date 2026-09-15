@@ -52,8 +52,8 @@ export default function Sidebar({
   const mainNavItems = [
     { label: "Explore", href: "/explorer", icon: Compass },
     { label: "Saved Queries", href: "/#saved", icon: Bookmark },
-    { label: "Visualizations", href: "/#visualizations", icon: BarChart3 },
-    { label: "Ocean Insights", href: "/#insights", icon: Sparkles },
+    { label: "Visualizations", href: "/explorer?variable=Float+Trajectories", icon: BarChart3 },
+    { label: "Ocean Insights", href: "/explorer?variable=Thermocline", icon: Sparkles },
   ];
 
   const featuredQueries = [

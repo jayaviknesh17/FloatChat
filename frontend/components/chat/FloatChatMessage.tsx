@@ -38,6 +38,88 @@ export default function FloatChatMessage({
   const primaryFloat = result.matchedFloats?.[0];
   const nlResponse = result.nlResponse;
 
+  const isConversational =
+    result.isConversational ||
+    nlResponse?.status === "conversational" ||
+    Boolean(nlResponse?.conversational_response);
+  const isClarification =
+    result.isClarification ||
+    nlResponse?.status === "clarification_needed";
+
+  // Conversational response rendering (Clean human response without scientific cards)
+  if (isConversational) {
+    return (
+      <div className="flex items-start gap-3 my-4 pr-4 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 p-[1.5px] shrink-0 shadow-[0_0_15px_rgba(6,182,212,0.4)]">
+          <div className="w-full h-full bg-[#051428] rounded-[9px] flex items-center justify-center">
+            <svg
+              viewBox="0 0 24 24"
+              className="w-4 h-4 text-cyan-300"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M2 12c4-4 8 4 12 0" />
+              <path d="M2 17c4-4 8 4 12 0 4-4 8 4 12 0" opacity="0.6" />
+            </svg>
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-3.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-white tracking-tight">FloatChat</span>
+            <span className="text-[10px] text-cyan-400/80 font-mono-sci px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/20">
+              Assistant
+            </span>
+          </div>
+
+          <div className="text-sm font-medium text-slate-100 leading-relaxed bg-[#051833]/60 p-3.5 rounded-xl border border-cyan-500/15">
+            {result.summary}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Clarification requested rendering
+  if (isClarification) {
+    return (
+      <div className="flex items-start gap-3 my-4 pr-4 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 p-[1.5px] shrink-0 shadow-[0_0_15px_rgba(6,182,212,0.4)]">
+          <div className="w-full h-full bg-[#051428] rounded-[9px] flex items-center justify-center">
+            <svg
+              viewBox="0 0 24 24"
+              className="w-4 h-4 text-cyan-300"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M2 12c4-4 8 4 12 0" />
+              <path d="M2 17c4-4 8 4 12 0 4-4 8 4 12 0" opacity="0.6" />
+            </svg>
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-3.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-white tracking-tight">FloatChat</span>
+            <span className="text-[10px] text-amber-300/90 font-mono-sci px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-500/30">
+              Clarification Requested
+            </span>
+          </div>
+
+          <div className="text-sm font-medium text-amber-100 leading-relaxed bg-amber-950/30 p-3.5 rounded-xl border border-amber-500/30">
+            {result.summary}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Extract observation profile points for inline chart if available
   const obsResults = nlResponse?.results || [];
   const tempProfile = obsResults

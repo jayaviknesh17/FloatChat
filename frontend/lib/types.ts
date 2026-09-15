@@ -169,6 +169,11 @@ export interface AnomalySummary {
   [key: string]: any;
 }
 
+export interface HistoryItem {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface NLExecutionResponse {
   original_query: string;
   status: "success" | "clarification_needed" | "error" | string;
@@ -204,6 +209,7 @@ export interface NLExecutionResponse {
   total_latency_ms: number;
   clarification?: string | null;
   confidence: number;
+  conversational_response?: string | null;
 }
 
 /**
@@ -312,6 +318,8 @@ export interface QueryResult {
   provenance: DataProvenance;
   timestamp: string;
   nlResponse?: NLExecutionResponse;
+  isConversational?: boolean;
+  isClarification?: boolean;
 }
 
 export interface ChatMessage {

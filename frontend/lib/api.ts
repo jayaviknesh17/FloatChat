@@ -10,6 +10,7 @@ import {
   UnderstoodQuery,
   KeyValueMetric,
   VisualizationType,
+  HistoryItem,
 } from "./types";
 
 const BACKEND_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -97,7 +98,10 @@ export async function getTrajectory(params?: TrajectoryParams): Promise<Trajecto
  * 3. POST /api/v1/nl-query/execute
  * Executes natural language queries against real ARGO dataset with statistical anomaly detection.
  */
-export async function executeNLQuery(query: string): Promise<NLExecutionResponse> {
+export async function executeNLQuery(
+  query: string,
+  history?: HistoryItem[]
+): Promise<NLExecutionResponse> {
   const url = `${BACKEND_API_URL}/api/v1/nl-query/execute`;
 
   const controller = new AbortController();
@@ -107,7 +111,7 @@ export async function executeNLQuery(query: string): Promise<NLExecutionResponse
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, history: history || [] }),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -263,10 +267,11 @@ export async function getSystemStatus(): Promise<SystemStatus> {
  */
 export async function submitOceanQuery(
   query: string,
-  selectedFilters?: string[]
+  selectedFilters?: string[],
+  history?: HistoryItem[]
 ): Promise<QueryResult> {
   // Execute real backend query
-  const nlResponse = await executeNLQuery(query);
+  const nlResponse = await executeNLQuery(query, history);
 
   const understoodQuery: UnderstoodQuery = {
     originalQuery: nlResponse.original_query,
@@ -283,10 +288,15 @@ export async function submitOceanQuery(
     analysis: nlResponse.interpreted_query?.analysis || "Real ARGO Profile Analysis",
   };
 
-  // Build scientific summary from real results
+  const isConversational = nlResponse.status === "conversational" || Boolean(nlResponse.conversational_response);
+  const isClarification = nlResponse.status === "clarification_needed" || Boolean(nlResponse.clarification && !isConversational);
+
+  // Build summary text
   let summaryText = "";
-  if (nlResponse.status === "clarification_needed" && nlResponse.clarification) {
-    summaryText = nlResponse.clarification;
+  if (isConversational) {
+    summaryText = nlResponse.conversational_response || "Hello! I'm FloatChat. I can help you explore real ARGO ocean data, analyze temperature and salinity, detect anomalies, and explore float trajectories.";
+  } else if (isClarification) {
+    summaryText = nlResponse.clarification || "Query is too vague and lacks target scientific parameters. Please specify region (e.g. Bay of Bengal), variable (temperature/salinity), or float ID.";
   } else if (nlResponse.count === 0) {
     summaryText = `No real ARGO observation records matched the query criteria across the specified region and depth interval.`;
   } else {
@@ -296,16 +306,18 @@ export async function submitOceanQuery(
     }
   }
 
-  // Key Value Metrics extracted directly from real response
-  const keyValues: KeyValueMetric[] = [
-    { label: "Target Region", value: understoodQuery.region },
-    { label: "Target Variable", value: understoodQuery.variable },
-    { label: "Observations", value: nlResponse.count.toLocaleString(), unit: "records" },
-    { label: "Floats Represented", value: `${nlResponse.float_count}`, unit: "floats" },
-    { label: "Execution Latency", value: `${nlResponse.total_latency_ms.toFixed(1)}`, unit: "ms" },
-  ];
+  // Key Value Metrics extracted directly from real response (only for scientific queries)
+  const keyValues: KeyValueMetric[] = (isConversational || isClarification)
+    ? []
+    : [
+        { label: "Target Region", value: understoodQuery.region },
+        { label: "Target Variable", value: understoodQuery.variable },
+        { label: "Observations", value: nlResponse.count.toLocaleString(), unit: "records" },
+        { label: "Floats Represented", value: `${nlResponse.float_count}`, unit: "floats" },
+        { label: "Execution Latency", value: `${nlResponse.total_latency_ms.toFixed(1)}`, unit: "ms" },
+      ];
 
-  if (nlResponse.anomaly_summary && (nlResponse.anomaly_summary.anomaly_count ?? 0) > 0) {
+  if (!isConversational && !isClarification && nlResponse.anomaly_summary && (nlResponse.anomaly_summary.anomaly_count ?? 0) > 0) {
     keyValues.push({
       label: "Max |Z-Score|",
       value: `+${(nlResponse.anomaly_summary.max_abs_z_score || 0).toFixed(2)}σ`,
@@ -314,48 +326,58 @@ export async function submitOceanQuery(
   }
 
   // Map real results into matchedFloats items for UI selection
-  const uniqueFloatIds = Array.from(new Set(nlResponse.results.map((r) => r.float_id)));
-  const matchedFloats: ArgoFloat[] = uniqueFloatIds.slice(0, 10).map((fid) => {
-    const floatRecords = nlResponse.results.filter((r) => r.float_id === fid);
-    const firstRec = floatRecords[0];
-    const hasAnomaly = floatRecords.some((r) => r.is_anomaly);
-    const anomalyRec = floatRecords.find((r) => r.is_anomaly);
+  const uniqueFloatIds = Array.from(new Set((nlResponse.results || []).map((r) => r.float_id)));
+  const matchedFloats: ArgoFloat[] = (isConversational || isClarification)
+    ? []
+    : uniqueFloatIds.slice(0, 10).map((fid) => {
+        const floatRecords = nlResponse.results.filter((r) => r.float_id === fid);
+        const firstRec = floatRecords[0];
+        const hasAnomaly = floatRecords.some((r) => r.is_anomaly);
+        const anomalyRec = floatRecords.find((r) => r.is_anomaly);
 
-    return {
-      id: fid,
-      name: `ARGO Float ${fid} (${firstRec.region})`,
-      wmo: fid,
-      region: firstRec.region as any,
-      lat: firstRec.latitude,
-      lon: firstRec.longitude,
-      status: "active",
-      lastCycle: firstRec.cycle_number,
-      lastDate: firstRec.profile_time.substring(0, 10),
-      dac: "ARGO GDAC",
-      platformType: "Core CTD Profiler",
-      sensorTypes: ["Pressure", "Temperature", "Salinity"],
-      netcdfSource: firstRec.source_file || `${fid}_prof.nc`,
-      currentAnomaly: hasAnomaly && anomalyRec
-        ? {
-            isAnomalous: true,
-            variable: "Temperature",
-            observedValue: anomalyRec.temperature_c || 0,
-            baselineValue: 0,
-            anomalyDelta: 0,
-            zScore: anomalyRec.z_score || 2.0,
-            severity: "significant",
-            statusLabel: "Statistical Anomaly Detected",
-            depthLevel: `${anomalyRec.depth_m.toFixed(0)}m`,
-            description: `Observation at depth ${anomalyRec.depth_m.toFixed(1)}m exhibits a Z-Score of ${anomalyRec.z_score?.toFixed(2)}σ relative to regional baseline.`,
-            floatId: fid,
-            cycle: anomalyRec.cycle_number,
-            date: anomalyRec.profile_time.substring(0, 10),
-          }
-        : undefined,
-    };
-  });
+        return {
+          id: fid,
+          name: `ARGO Float ${fid} (${firstRec.region})`,
+          wmo: fid,
+          region: firstRec.region as any,
+          lat: firstRec.latitude,
+          lon: firstRec.longitude,
+          status: "active",
+          lastCycle: firstRec.cycle_number,
+          lastDate: firstRec.profile_time.substring(0, 10),
+          dac: "ARGO GDAC",
+          platformType: "Core CTD Profiler",
+          sensorTypes: ["Pressure", "Temperature", "Salinity"],
+          netcdfSource: firstRec.source_file || `${fid}_prof.nc`,
+          currentAnomaly: hasAnomaly && anomalyRec
+            ? {
+                isAnomalous: true,
+                variable: "Temperature",
+                observedValue: anomalyRec.temperature_c || 0,
+                baselineValue: 0,
+                anomalyDelta: 0,
+                zScore: anomalyRec.z_score || 2.0,
+                severity: "significant",
+                statusLabel: "Statistical Anomaly Detected",
+                depthLevel: `${anomalyRec.depth_m.toFixed(0)}m`,
+                description: `Observation at depth ${anomalyRec.depth_m.toFixed(1)}m exhibits a Z-Score of ${anomalyRec.z_score?.toFixed(2)}σ relative to regional baseline.`,
+                floatId: fid,
+                cycle: anomalyRec.cycle_number,
+                date: anomalyRec.profile_time.substring(0, 10),
+              }
+            : undefined,
+        };
+      });
 
-  const firstRec = nlResponse.results[0];
+  const firstRec = nlResponse.results?.[0];
+
+  const interpretation: string[] = (isConversational || isClarification)
+    ? []
+    : [
+        `Observations retrieved directly from real ARGO multi-profile NetCDF archive via parameterized SQLite queries.`,
+        `Quality control filter retained only flags 1 (Good) and 2 (Probably Good).`,
+        `Total backend latency: ${nlResponse.total_latency_ms.toFixed(2)} ms (SQLite DB: ${nlResponse.sqlite_db_latency_ms.toFixed(2)} ms).`,
+      ];
 
   return {
     queryId: `query_${Date.now()}`,
@@ -363,12 +385,8 @@ export async function submitOceanQuery(
     understood: understoodQuery,
     summary: summaryText,
     keyValues,
-    interpretation: [
-      `Observations retrieved directly from real ARGO multi-profile NetCDF archive via parameterized SQLite queries.`,
-      `Quality control filter retained only flags 1 (Good) and 2 (Probably Good).`,
-      `Total backend latency: ${nlResponse.total_latency_ms.toFixed(2)} ms (SQLite DB: ${nlResponse.sqlite_db_latency_ms.toFixed(2)} ms).`,
-    ],
-    visualizationType: nlResponse.results.length > 0 ? "ts-profile" : "none",
+    interpretation,
+    visualizationType: (isConversational || isClarification || (nlResponse.results || []).length === 0) ? "none" : "ts-profile",
     matchedFloats,
     provenance: {
       floatId: firstRec?.float_id || (nlResponse.provenance?.float_ids?.[0] || "Array"),
@@ -384,5 +402,7 @@ export async function submitOceanQuery(
     },
     timestamp: new Date().toISOString(),
     nlResponse,
+    isConversational,
+    isClarification,
   };
 }
