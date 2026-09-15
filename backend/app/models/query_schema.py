@@ -178,6 +178,7 @@ class NLQueryInput(BaseModel):
     """Input payload for POST /api/v1/nl-query."""
 
     query: str = Field(..., min_length=1, description="Natural language question about ocean data")
+    history: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Optional conversation context history [{'role': 'user'|'assistant', 'content': '...'}]")
 
 
 class NLQueryOutput(BaseModel):
@@ -190,6 +191,7 @@ class NLQueryOutput(BaseModel):
     clarification: Optional[str] = Field(None, description="Explanation or clarification prompt if input was ambiguous or invalid")
     confidence: float = Field(1.0, description="Confidence score of natural language parsing (0.0 to 1.0)")
     conversational_response: Optional[str] = Field(None, description="Friendly conversational text or educational explanation when status is 'conversational'")
+    response_language: Optional[str] = Field("en", description="Detected/target response language: 'en', 'ta', or 'hi'")
 
 
 class NLExecutionResponse(BaseModel):
@@ -211,6 +213,7 @@ class NLExecutionResponse(BaseModel):
     clarification: Optional[str] = Field(None, description="Clarification request prompt if query was ambiguous")
     confidence: float = Field(1.0, description="NL parsing confidence score")
     conversational_response: Optional[str] = Field(None, description="Friendly conversational text or educational explanation when status is 'conversational'")
+    response_language: Optional[str] = Field("en", description="Detected/target response language: 'en', 'ta', or 'hi'")
 
 
 

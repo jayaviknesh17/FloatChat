@@ -14,7 +14,7 @@ import AnomalyPanel from "@/components/panels/AnomalyPanel";
 import DataEvidencePanel from "@/components/panels/DataEvidencePanel";
 import AboutModal from "@/components/modals/AboutModal";
 import SettingsModal from "@/components/modals/SettingsModal";
-import { ArgoFloat, AnomalyReport, DataProvenance, ChatMessage, SystemStatus } from "@/lib/types";
+import { ArgoFloat, AnomalyReport, DataProvenance, ChatMessage, SystemStatus, HistoryItem } from "@/lib/types";
 import { getSystemStatus, submitOceanQuery } from "@/lib/api";
 
 export default function Home() {
@@ -55,6 +55,22 @@ export default function Home() {
   const handleSendMessage = async (queryText: string, activeFilters: string[] = []) => {
     if (!queryText.trim()) return;
 
+    // Build short recent conversation history for backend context (max 10 items)
+    const history: HistoryItem[] = messages
+      .slice(-10)
+      .map((msg) => {
+        if (msg.sender === "user") {
+          return { role: "user" as const, content: msg.text || "" };
+        } else {
+          const content =
+            msg.result?.nlResponse?.conversational_response ||
+            msg.result?.summary ||
+            "";
+          return { role: "assistant" as const, content };
+        }
+      })
+      .filter((item) => item.content.trim().length > 0);
+
     const userMessageId = `user_${Date.now()}`;
     const userMessage: ChatMessage = {
       id: userMessageId,
@@ -74,7 +90,7 @@ export default function Home() {
     });
 
     try {
-      const result = await submitOceanQuery(queryText, activeFilters);
+      const result = await submitOceanQuery(queryText, activeFilters, history);
 
       const botMessageId = `bot_${Date.now()}`;
       const botMessage: ChatMessage = {

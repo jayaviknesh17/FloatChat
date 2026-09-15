@@ -34,6 +34,8 @@ import {
   ExternalLink,
   Route,
   RefreshCw,
+  X,
+  Radio,
 } from "lucide-react";
 
 export default function ExplorerPage() {
@@ -50,6 +52,7 @@ export default function ExplorerPage() {
   const [floats, setFloats] = useState<FloatSummaryItem[]>([]);
   const [trajectories, setTrajectories] = useState<TrajectoryPoint[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isTrajectoryLoading, setIsTrajectoryLoading] = useState<boolean>(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -66,15 +69,43 @@ export default function ExplorerPage() {
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  // Helper: Explore region action (filters region, auto-focuses map, and activates trajectory paths)
+  const handleExploreRegion = (region: OceanRegion) => {
+    setSelectedRegion(region);
+    setActiveVariable("Float Trajectories");
+  };
+
+  // Read URL Query Parameters on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const v = params.get("variable");
+      const r = params.get("region");
+      if (v) {
+        const decoded = decodeURIComponent(v);
+        if (["Temperature", "Salinity", "Marine Heatwaves", "Thermocline", "Float Trajectories", "All Variables"].includes(decoded)) {
+          setActiveVariable(decoded as any);
+        }
+      }
+      if (r) {
+        const decoded = decodeURIComponent(r);
+        if (["Bay of Bengal", "Arabian Sea", "Indian Ocean", "All"].includes(decoded)) {
+          setSelectedRegion(decoded as any);
+        }
+      }
+    }
+  }, []);
+
   // Load live data from real backend
   const loadExplorerData = async () => {
     setIsLoading(true);
     setFetchError(null);
 
     try {
+      const regionParam = (selectedRegion !== "All" && selectedRegion !== "Indian Ocean") ? selectedRegion : undefined;
       const [sysStatus, floatsResp] = await Promise.all([
         getSystemStatus(),
-        getFloatVisualization(selectedRegion !== "All" ? selectedRegion : undefined),
+        getFloatVisualization(regionParam),
       ]);
 
       setStatus(sysStatus);
@@ -104,34 +135,104 @@ export default function ExplorerPage() {
     loadExplorerData();
   }, [selectedRegion]);
 
-  // Load real trajectories when variable is Float Trajectories
+  // Load real trajectories when variable is Float Trajectories or when region/timeRange changes
   useEffect(() => {
     if (activeVariable === "Float Trajectories") {
+      setIsTrajectoryLoading(true);
+      let startDate: string | undefined;
+      const now = new Date();
+      if (timeRange === "Last 30 Days") {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 30);
+        startDate = d.toISOString().substring(0, 10);
+      } else if (timeRange === "Last 3 Months") {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 90);
+        startDate = d.toISOString().substring(0, 10);
+      } else if (timeRange === "Last 6 Months") {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 180);
+        startDate = d.toISOString().substring(0, 10);
+      } else if (timeRange === "Past Year") {
+        const d = new Date(now);
+        d.setDate(d.getDate() - 365);
+        startDate = d.toISOString().substring(0, 10);
+      }
+
+      const regionParam = (selectedRegion !== "All" && selectedRegion !== "Indian Ocean") ? selectedRegion : undefined;
+
       getTrajectory({
-        region: selectedRegion !== "All" ? selectedRegion : undefined,
+        region: regionParam,
+        start_date: startDate,
         limit: 300,
       })
         .then((resp) => {
           if (resp && resp.points) {
             setTrajectories(resp.points);
+          } else {
+            setTrajectories([]);
           }
         })
         .catch(() => {
           setTrajectories([]);
+        })
+        .finally(() => {
+          setIsTrajectoryLoading(false);
         });
     } else {
       setTrajectories([]);
+      setIsTrajectoryLoading(false);
     }
-  }, [activeVariable, selectedRegion]);
+  }, [activeVariable, selectedRegion, timeRange]);
 
-  // Filtered floats based on search query
+  // Intelligent Search & Filter Handling
+  const handleSearchChange = (queryStr: string) => {
+    setSearchQuery(queryStr);
+    const q = queryStr.trim().toLowerCase();
+    if (!q) return;
+
+    // Region search matching
+    if (q === "bay of bengal" || q === "bob") {
+      setSelectedRegion("Bay of Bengal");
+    } else if (q === "arabian sea" || q === "as") {
+      setSelectedRegion("Arabian Sea");
+    } else if (q === "indian ocean" || q === "io") {
+      setSelectedRegion("Indian Ocean");
+    }
+
+    // Variable search matching
+    if (q.includes("temp")) {
+      setActiveVariable("Temperature");
+    } else if (q.includes("salin")) {
+      setActiveVariable("Salinity");
+    } else if (q.includes("heatwave") || q.includes("marine")) {
+      setActiveVariable("Marine Heatwaves");
+    } else if (q.includes("thermo")) {
+      setActiveVariable("Thermocline");
+    } else if (q.includes("traject") || q.includes("drift") || q.includes("route")) {
+      setActiveVariable("Float Trajectories");
+    }
+
+    // Float ID search matching (e.g. "2902236")
+    const matchedFloat = floats.find((f) => f.float_id.toLowerCase().includes(q));
+    if (matchedFloat) {
+      setSelectedFloat(matchedFloat);
+    }
+  };
+
+  // Filtered floats based on search query & selected region
   const filteredFloats = floats.filter((f) => {
-    if (selectedRegion !== "All" && f.region !== selectedRegion) return false;
+    if (selectedRegion !== "All" && selectedRegion !== "Indian Ocean" && f.region !== selectedRegion) {
+      return false;
+    }
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.trim().toLowerCase();
       const matchesId = f.float_id.toLowerCase().includes(q);
       const matchesRegion = f.region.toLowerCase().includes(q);
-      if (!matchesId && !matchesRegion) return false;
+      const isKeyword = ["temp", "temperature", "salinity", "salin", "heatwave", "marine", "thermo", "thermocline", "traject", "trajectory", "trajectories", "bay of bengal", "arabian sea", "indian ocean"].some((kw) => q.includes(kw));
+      if (!matchesId && !matchesRegion && !isKeyword) {
+        return false;
+      }
     }
     return true;
   });
@@ -223,7 +324,7 @@ export default function ExplorerPage() {
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => handleSearchChange(e.target.value)}
                   placeholder="Search region, float ID, or variable..."
                   className="w-full bg-[#04162e]/70 hover:bg-[#061d3d]/80 focus:bg-[#072146] border border-cyan-500/25 focus:border-cyan-400/60 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-cyan-400/40 backdrop-blur-md transition-all font-sans"
                 />
@@ -340,6 +441,24 @@ export default function ExplorerPage() {
             </div>
           </div>
 
+          {/* Prototype Scope Indication Banner for Indian Ocean */}
+          {(selectedRegion === "Indian Ocean" || selectedRegion === "All") && (
+            <div className="px-3.5 py-2 rounded-xl bg-[#041938]/70 border border-cyan-500/20 text-xs text-cyan-300 flex items-center justify-between gap-2 backdrop-blur-md font-sans animate-in fade-in duration-150">
+              <div className="flex items-center gap-2">
+                <Info className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span>
+                  Prototype dataset covers <strong>{status.floatCount.total || 24} real ARGO floats</strong> across the Bay of Bengal ({status.floatCount.bayOfBengal || 12}) and Arabian Sea ({status.floatCount.arabianSea || 12}) regions of the Indian Ocean array.
+                </span>
+              </div>
+              <button
+                onClick={() => setSelectedRegion("Bay of Bengal")}
+                className="text-[11px] font-semibold text-cyan-200 hover:text-white underline shrink-0"
+              >
+                Filter Bay of Bengal
+              </button>
+            </div>
+          )}
+
           {/* Main Content Grid: Map (Left 75%) + Ocean at a Glance (Right 25%) */}
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-stretch min-h-[440px]">
             {/* Left: Large Interactive Ocean Map Canvas */}
@@ -352,9 +471,59 @@ export default function ExplorerPage() {
                 selectedRegion={selectedRegion}
                 isRealDataConnected={status.isRealDataConnected}
                 isLoading={isLoading}
+                isTrajectoryLoading={isTrajectoryLoading}
                 error={fetchError}
                 trajectories={trajectories}
               />
+
+              {/* Floating Selected Float Inspector Overlay Badge */}
+              {selectedFloat && (
+                <div className="absolute top-4 right-4 z-30 p-3.5 rounded-2xl bg-[#041733]/90 backdrop-blur-xl border border-cyan-400/50 shadow-2xl w-64 text-xs animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                      <span className="font-bold text-white font-mono-sci">
+                        ARGO Float #{selectedFloat.float_id}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setSelectedFloat(null)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60"
+                      title="Clear Selection"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <p className="text-slate-300 font-medium mb-1">
+                    Region: <span className="text-cyan-300">{selectedFloat.region}</span>
+                  </p>
+                  <p className="text-[11px] text-slate-400 font-mono-sci mb-1">
+                    Pos: {selectedFloat.latest_latitude?.toFixed(3)}°N, {selectedFloat.latest_longitude?.toFixed(3)}°E
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-1.5 my-2 pt-1 border-t border-cyan-500/15 text-[10.5px] font-mono-sci">
+                    <div>
+                      <span className="text-slate-400 block">Profiles</span>
+                      <span className="font-bold text-white">{selectedFloat.profile_count}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Observations</span>
+                      <span className="font-bold text-cyan-300">{selectedFloat.observation_count?.toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setSelectedFloat({ ...selectedFloat });
+                    }}
+                    className="w-full mt-1 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-md transition-colors"
+                  >
+                    <Waves className="w-3.5 h-3.5" />
+                    <span>View Profile Analysis</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Right: Ocean at a Glance Panel */}
@@ -421,36 +590,49 @@ export default function ExplorerPage() {
                     Quick Actions
                   </span>
                   <div className="space-y-1.5">
+                    {/* Toggle Region */}
                     <button
                       onClick={() => {
-                        setSelectedRegion(selectedRegion === "Bay of Bengal" ? "Arabian Sea" : "Bay of Bengal");
+                        const target = selectedRegion === "Bay of Bengal" ? "Arabian Sea" : "Bay of Bengal";
+                        setSelectedRegion(target);
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#04162e]/60 hover:bg-[#07244d]/80 border border-cyan-500/20 text-xs font-semibold text-cyan-200 hover:text-white transition-all text-left"
                     >
-                      <Search className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Toggle Region ({selectedRegion === "Bay of Bengal" ? "Arabian Sea" : "Bay of Bengal"})</span>
+                      <Search className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span className="truncate">
+                        Toggle Region ({selectedRegion === "Bay of Bengal" ? "Arabian Sea" : "Bay of Bengal"})
+                      </span>
                     </button>
+
+                    {/* Select a Random Float */}
                     <button
                       onClick={() => {
-                        if (floats.length > 0) {
-                          const randomFloat = floats[Math.floor(Math.random() * floats.length)];
+                        const pool = filteredFloats.length > 0 ? filteredFloats : floats;
+                        if (pool.length > 0) {
+                          const randomFloat = pool[Math.floor(Math.random() * pool.length)];
                           setSelectedFloat(randomFloat);
                         }
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#04162e]/60 hover:bg-[#07244d]/80 border border-cyan-500/20 text-xs font-semibold text-cyan-200 hover:text-white transition-all text-left"
                     >
-                      <Compass className="w-3.5 h-3.5 text-cyan-400" />
+                      <Compass className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                       <span>Select a Random Float</span>
                     </button>
+
+                    {/* View Profiles */}
                     <button
                       onClick={() => {
-                        if (floats.length > 0) {
-                          setSelectedFloat(selectedFloat || floats[0]);
+                        if (selectedFloat) {
+                          setSelectedFloat({ ...selectedFloat });
+                        } else if (filteredFloats.length > 0) {
+                          setSelectedFloat(filteredFloats[0]);
+                        } else if (floats.length > 0) {
+                          setSelectedFloat(floats[0]);
                         }
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#04162e]/60 hover:bg-[#07244d]/80 border border-cyan-500/20 text-xs font-semibold text-cyan-200 hover:text-white transition-all text-left"
                     >
-                      <Waves className="w-3.5 h-3.5 text-cyan-400" />
+                      <Waves className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                       <span>View Profiles</span>
                     </button>
                   </div>
@@ -481,7 +663,7 @@ export default function ExplorerPage() {
                 return (
                   <div
                     key={rc.id}
-                    onClick={() => setSelectedRegion(rc.region)}
+                    onClick={() => handleExploreRegion(rc.region)}
                     className={`group relative rounded-2xl overflow-hidden border cursor-pointer transition-all duration-200 flex flex-col justify-end min-h-[170px] p-4 ${
                       isSelected
                         ? "border-cyan-400/80 shadow-[0_0_20px_rgba(34,211,238,0.25)]"
@@ -507,7 +689,7 @@ export default function ExplorerPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedRegion(rc.region);
+                            handleExploreRegion(rc.region);
                           }}
                           className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#04162e]/80 hover:bg-cyan-900/60 border border-cyan-500/30 text-xs font-semibold text-cyan-200 hover:text-white transition-all backdrop-blur-md"
                         >
@@ -555,3 +737,4 @@ export default function ExplorerPage() {
     </div>
   );
 }
+

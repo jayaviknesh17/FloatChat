@@ -106,7 +106,7 @@ def get_floats_endpoint() -> FloatListResponse:
 def execute_nl_query_endpoint(input_data: NLQueryInput) -> NLExecutionResponse:
     """Translate and execute natural language query against real ARGO database."""
     try:
-        return query_service.execute_nl_query(input_data.query)
+        return query_service.execute_nl_query(input_data.query, history=input_data.history)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -125,5 +125,5 @@ def parse_nl_query_endpoint(input_data: NLQueryInput) -> NLQueryOutput:
     """Translate natural language query to validated structured QueryRequest."""
     from backend.app.services.nl_query_service import NLQueryService
     nl_service = NLQueryService()
-    return nl_service.parse_query(input_data.query)
+    return nl_service.parse_query(input_data.query, history=input_data.history)
 
