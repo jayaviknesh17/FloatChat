@@ -7,9 +7,11 @@ import { SystemStatus } from "@/lib/types";
 interface TopNavProps {
   status: SystemStatus;
   onOpenAbout?: () => void;
+  onOpenSettings?: () => void;
 }
 
-export default function TopNav({ status, onOpenAbout }: TopNavProps) {
+export default function TopNav({ status, onOpenAbout, onOpenSettings }: TopNavProps) {
+
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (

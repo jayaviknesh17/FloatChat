@@ -5,6 +5,12 @@ import { ArgoFloat, ProfileAnalysisResponse, FloatSummaryItem } from "@/lib/type
 import { getFloatProfileAnalysis } from "@/lib/api";
 import TSProfileChart from "../charts/TSProfileChart";
 import {
+  saveVisualization,
+  isVisualizationSaved,
+  deleteSavedVisualization,
+  SAVED_STORAGE_EVENT,
+} from "@/lib/savedStorage";
+import {
   X,
   Radio,
   Calendar,
@@ -16,6 +22,10 @@ import {
   Flame,
   Loader2,
   Waves,
+  BarChart3,
+  Bookmark,
+  BookmarkCheck,
+  Check,
 } from "lucide-react";
 
 interface FloatProfilePanelProps {
@@ -32,10 +42,26 @@ export default function FloatProfilePanel({
   const [analysis, setAnalysis] = useState<ProfileAnalysisResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSaved, setIsSaved] = useState<boolean>(false);
 
   const floatId = argoFloat ? (("float_id" in argoFloat ? argoFloat.float_id : argoFloat.id) || "") : "";
   const floatWmo = argoFloat ? (("wmo" in argoFloat ? argoFloat.wmo : argoFloat.float_id) || floatId) : "";
   const floatRegion = argoFloat ? argoFloat.region : "";
+
+  // Check saved state
+  useEffect(() => {
+    const updateSaved = () => {
+      if (floatId) {
+        setIsSaved(isVisualizationSaved(floatId, "ts-profile"));
+      }
+    };
+    updateSaved();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(SAVED_STORAGE_EVENT, updateSaved);
+      return () => window.removeEventListener(SAVED_STORAGE_EVENT, updateSaved);
+    }
+  }, [floatId]);
 
   // Fetch real profile analysis when a float is selected
   useEffect(() => {
@@ -68,6 +94,29 @@ export default function FloatProfilePanel({
     };
   }, [floatId]);
 
+  const handleToggleSave = () => {
+    if (!floatId) return;
+    if (isSaved) {
+      const savedList = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("floatchat_saved_visualizations") || "[]") : [];
+      const item = savedList.find((v: any) => v.floatId === floatId && v.type === "ts-profile");
+      if (item) {
+        deleteSavedVisualization(item.id);
+      }
+      setIsSaved(false);
+    } else {
+      saveVisualization({
+        title: `CTD Profile • Float #${floatWmo}`,
+        type: "ts-profile",
+        region: floatRegion,
+        floatId: floatId,
+        cycleNumber: analysis?.cycle_number,
+        variable: "Temperature & Salinity",
+        description: `Vertical CTD temperature and salinity profile for ARGO float #${floatWmo} (${floatRegion}).`,
+      });
+      setIsSaved(true);
+    }
+  };
+
   if (!argoFloat) return null;
 
   return (
@@ -84,12 +133,37 @@ export default function FloatProfilePanel({
             </span>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Save Visualization button */}
+            <button
+              onClick={handleToggleSave}
+              title={isSaved ? "Saved to Visualizations" : "Save this CTD profile to Visualizations"}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                isSaved
+                  ? "bg-emerald-500/20 border border-emerald-400/50 text-emerald-300"
+                  : "bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/30 text-cyan-300 hover:text-white"
+              }`}
+            >
+              {isSaved ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Saved</span>
+                </>
+              ) : (
+                <>
+                  <Bookmark className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Save View</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <h2 className="text-lg font-bold text-white tracking-tight">
@@ -231,3 +305,4 @@ export default function FloatProfilePanel({
     </div>
   );
 }
+

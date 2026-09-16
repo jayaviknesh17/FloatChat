@@ -51,9 +51,9 @@ export default function Sidebar({
 
   const mainNavItems = [
     { label: "Explore", href: "/explorer", icon: Compass },
-    { label: "Saved Queries", href: "/#saved", icon: Bookmark },
-    { label: "Visualizations", href: "/explorer?variable=Float+Trajectories", icon: BarChart3 },
-    { label: "Ocean Insights", href: "/explorer?variable=Thermocline", icon: Sparkles },
+    { label: "Saved Queries", href: "/saved", icon: Bookmark },
+    { label: "Visualizations", href: "/visualizations", icon: BarChart3 },
+    { label: "Ocean Insights", href: "/insights", icon: Sparkles },
   ];
 
   const featuredQueries = [
@@ -286,46 +286,46 @@ export default function Sidebar({
           {/* Divider */}
           <div className="h-[1px] bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent mx-1" />
 
-          {/* EXPLORE BY VARIABLE Section */}
+          {/* FEATURED QUERIES Section */}
           {isOpen && (
             <div className="animate-in fade-in duration-200">
               <div className="px-2 mb-1.5 flex items-center justify-between">
                 <span className="text-[10px] font-bold tracking-wider text-cyan-400/90 uppercase font-mono-sci">
-                  EXPLORE BY VARIABLE
+                  FEATURED QUERIES
                 </span>
               </div>
 
               <div className="space-y-0.5">
                 {[
                   {
-                    label: "Temperature",
-                    icon: Flame,
-                    href: "/explorer?variable=Temperature",
-                    query: "Show me temperature profiles and anomalies in the Indian Ocean.",
-                  },
-                  {
-                    label: "Salinity",
-                    icon: Droplet,
-                    href: "/explorer?variable=Salinity",
-                    query: "Plot salinity profiles and halocline depth in the Arabian Sea.",
-                  },
-                  {
                     label: "Marine Heatwaves",
                     icon: Flame,
-                    href: "/explorer?variable=Marine+Heatwaves",
-                    query: "Detect marine heatwaves in the Indian Ocean.",
+                    query: "Detect marine heatwaves in the Indian Ocean in the last 2 years.",
                   },
                   {
-                    label: "Thermocline",
+                    label: "Bay of Bengal",
+                    icon: Globe2,
+                    query: "Show me temperature anomalies in the Bay of Bengal during 2025 below 500 meters.",
+                  },
+                  {
+                    label: "Arabian Sea",
                     icon: Waves,
-                    href: "/explorer?variable=Thermocline",
-                    query: "Where is the thermocline depth in the Bay of Bengal?",
+                    query: "Plot salinity profiles near the Arabian Sea for the last 6 months.",
+                  },
+                  {
+                    label: "Thermocline Analysis",
+                    icon: Layers,
+                    query: "Where is the thermocline depth in the Bay of Bengal during summer 2025?",
+                  },
+                  {
+                    label: "Salinity Trends",
+                    icon: Droplet,
+                    query: "Analyze salinity stratification and barrier layer in the Northern Indian Ocean.",
                   },
                   {
                     label: "Float Trajectories",
                     icon: Route,
-                    href: "/explorer?variable=Float+Trajectories",
-                    query: "Display 3D drift trajectories for active floats in the Bay of Bengal.",
+                    query: "Display 3D drift trajectories and cycle paths for active floats in the Bay of Bengal.",
                   },
                 ].map((item) => {
                   const Icon = item.icon;
@@ -333,11 +333,7 @@ export default function Sidebar({
                     <button
                       key={item.label}
                       onClick={() => {
-                        if (pathname === "/explorer") {
-                          if (onSelectFeaturedQuery) onSelectFeaturedQuery(item.label);
-                        } else {
-                          handleQueryClick(item.query);
-                        }
+                        handleQueryClick(item.query);
                       }}
                       title={item.label}
                       className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-normal text-slate-300 hover:text-cyan-200 hover:bg-cyan-950/40 hover:border-cyan-500/20 border border-transparent transition-all group text-left"
@@ -352,6 +348,7 @@ export default function Sidebar({
               </div>
             </div>
           )}
+
         </div>
 
         {/* Bottom Sidebar Status Card & Footer Utility */}

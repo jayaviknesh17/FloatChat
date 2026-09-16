@@ -354,3 +354,38 @@ export interface SystemStatus {
   sublabel: string;
   activeMission: string;
 }
+
+export interface SavedQuery {
+  id: string;
+  title?: string;
+  queryText: string;
+  category?: "Temperature" | "Salinity" | "Anomalies" | "Trajectories" | "All" | string;
+  tags?: string[];
+  thumbnailType?: "temperature-anomaly" | "salinity-profile" | "thermocline-depth" | "marine-heatwaves" | "float-trajectory" | "surface-trends" | "generic";
+  region?: string;
+  variable?: string;
+  depth?: string;
+  period?: string;
+  analysis?: string;
+  savedAt: string;
+  summary?: string;
+  observationCount?: number;
+  floatCount?: number;
+  floatId?: string;
+  resultType?: string;
+  visualizationType?: string;
+}
+
+export interface SavedVisualization {
+  id: string;
+  title: string;
+  type: "ts-profile" | "trajectory" | "anomaly" | "overview";
+  region?: string;
+  floatId?: string;
+  cycleNumber?: number;
+  variable?: string;
+  savedAt: string;
+  description?: string;
+}
+
+

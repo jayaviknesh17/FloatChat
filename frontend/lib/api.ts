@@ -15,42 +15,81 @@ import {
 
 const BACKEND_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// In-memory cache for instant client-side route transitions & deduplication
+const apiCache = new Map<string, { data: any; timestamp: number }>();
+const inFlightRequests = new Map<string, Promise<any>>();
+
+function getFromCache<T>(key: string, ttlMs: number): T | null {
+  const item = apiCache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > ttlMs) {
+    apiCache.delete(key);
+    return null;
+  }
+  return item.data as T;
+}
+
+function setInCache(key: string, data: any) {
+  apiCache.set(key, { data, timestamp: Date.now() });
+}
+
 /**
  * 1. GET /api/v1/visualization/floats
  * Retrieves lightweight float summary list for map markers, dropdowns, and stats.
  */
 export async function getFloatVisualization(region?: string): Promise<FloatSummaryResponse> {
-  const url = new URL(`${BACKEND_API_URL}/api/v1/visualization/floats`);
-  if (region && region !== "All") {
-    const rClean = region.toLowerCase().replace(/\s+/g, "_");
-    url.searchParams.set("region", rClean);
+  const rKey = region && region !== "All" ? region.toLowerCase().replace(/\s+/g, "_") : "all";
+  const cacheKey = `floats_${rKey}`;
+
+  const cached = getFromCache<FloatSummaryResponse>(cacheKey, 60000); // 60s TTL
+  if (cached) {
+    return cached;
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-  try {
-    const res = await fetch(url.toString(), {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      throw new Error(`Failed to fetch floats (HTTP ${res.status}): ${res.statusText}`);
-    }
-
-    const data: FloatSummaryResponse = await res.json();
-    return data;
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    if (err.name === "AbortError") {
-      throw new Error("Request to FloatChat backend timed out after 8s.");
-    }
-    throw err;
+  // Deduplicate in-flight requests
+  if (inFlightRequests.has(cacheKey)) {
+    return inFlightRequests.get(cacheKey)!;
   }
+
+  const fetchPromise = (async () => {
+    const url = new URL(`${BACKEND_API_URL}/api/v1/visualization/floats`);
+    if (region && region !== "All") {
+      url.searchParams.set("region", rKey);
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const res = await fetch(url.toString(), {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`Failed to fetch floats (HTTP ${res.status}): ${res.statusText}`);
+      }
+
+      const data: FloatSummaryResponse = await res.json();
+      setInCache(cacheKey, data);
+      return data;
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        throw new Error("Request to FloatChat backend timed out after 8s.");
+      }
+      throw err;
+    } finally {
+      inFlightRequests.delete(cacheKey);
+    }
+  })();
+
+  inFlightRequests.set(cacheKey, fetchPromise);
+  return fetchPromise;
 }
+
 
 /**
  * 2. GET /api/v1/visualization/trajectory
@@ -141,6 +180,12 @@ export async function getFloatProfileAnalysis(
   cycleNumber?: number,
   date?: string
 ): Promise<ProfileAnalysisResponse> {
+  const cacheKey = `analysis_${floatId}_${cycleNumber ?? "latest"}_${date ?? "latest"}`;
+  const cached = getFromCache<ProfileAnalysisResponse>(cacheKey, 120000); // 2 min TTL
+  if (cached) {
+    return cached;
+  }
+
   const url = new URL(`${BACKEND_API_URL}/api/v1/profile/${encodeURIComponent(floatId)}/analysis`);
 
   if (cycleNumber !== undefined && cycleNumber !== null) {
@@ -166,6 +211,7 @@ export async function getFloatProfileAnalysis(
     }
 
     const data: ProfileAnalysisResponse = await res.json();
+    setInCache(cacheKey, data);
     return data;
   } catch (err: any) {
     clearTimeout(timeoutId);
@@ -180,6 +226,12 @@ export async function getFloatProfileAnalysis(
  * 5. GET system status & live connection truthfulness
  */
 export async function getSystemStatus(): Promise<SystemStatus> {
+  const cacheKey = "system_status";
+  const cached = getFromCache<SystemStatus>(cacheKey, 15000); // 15s TTL
+  if (cached) {
+    return cached;
+  }
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -215,7 +267,7 @@ export async function getSystemStatus(): Promise<SystemStatus> {
 
         const formattedDate = latestObs ? latestObs.substring(0, 10) : undefined;
 
-        return {
+        const result: SystemStatus = {
           isConnected: true,
           isRealDataConnected: true,
           floatCount: {
@@ -229,12 +281,14 @@ export async function getSystemStatus(): Promise<SystemStatus> {
           sublabel: "Live Array",
           activeMission: "Global Ocean Profiling Array",
         };
+        setInCache(cacheKey, result);
+        return result;
       }
     }
 
     // 2. Backend online but data empty/unavailable
     if (healthRes && healthRes.ok) {
-      return {
+      const result: SystemStatus = {
         isConnected: true,
         isRealDataConnected: false,
         isDataUnavailable: true,
@@ -244,13 +298,15 @@ export async function getSystemStatus(): Promise<SystemStatus> {
         sublabel: "Data unavailable",
         activeMission: "Development preview",
       };
+      setInCache(cacheKey, result);
+      return result;
     }
   } catch {
     // Backend offline
   }
 
   // 3. Backend offline
-  return {
+  const offlineResult: SystemStatus = {
     isConnected: false,
     isRealDataConnected: false,
     floatCount: { total: 0, bayOfBengal: 0, arabianSea: 0 },
@@ -259,7 +315,10 @@ export async function getSystemStatus(): Promise<SystemStatus> {
     sublabel: "Backend offline",
     activeMission: "Development preview",
   };
+  setInCache(cacheKey, offlineResult);
+  return offlineResult;
 }
+
 
 /**
  * 6. High-level submitOceanQuery:

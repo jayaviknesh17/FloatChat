@@ -1,9 +1,17 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { QueryResult, ArgoFloat } from "@/lib/types";
 import TSProfileChart from "../charts/TSProfileChart";
+import {
+  saveQuery,
+  deleteSavedQuery,
+  isQuerySaved,
+  saveVisualization,
+  isVisualizationSaved,
+  SAVED_STORAGE_EVENT,
+} from "@/lib/savedStorage";
 import {
   Sparkles,
   ChevronDown,
@@ -21,6 +29,10 @@ import {
   CheckCircle2,
   AlertTriangle,
   Flame,
+  Bookmark,
+  BookmarkCheck,
+  BarChart3,
+  Check,
 } from "lucide-react";
 
 interface FloatChatMessageProps {
@@ -35,8 +47,64 @@ export default function FloatChatMessage({
   onOpenEvidence,
 }: FloatChatMessageProps) {
   const [showUnderstood, setShowUnderstood] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [isVisSaved, setIsVisSaved] = useState(false);
   const primaryFloat = result.matchedFloats?.[0];
   const nlResponse = result.nlResponse;
+
+  useEffect(() => {
+    const updateSavedState = () => {
+      setIsSaved(isQuerySaved(result.queryText));
+      if (primaryFloat) {
+        setIsVisSaved(isVisualizationSaved(primaryFloat.id, "ts-profile"));
+      }
+    };
+    updateSavedState();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener(SAVED_STORAGE_EVENT, updateSavedState);
+      return () => window.removeEventListener(SAVED_STORAGE_EVENT, updateSavedState);
+    }
+  }, [result.queryText, primaryFloat]);
+
+  const handleToggleSaveQuery = () => {
+    if (isSaved) {
+      // Find and delete
+      const savedList = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("floatchat_saved_queries") || "[]") : [];
+      const item = savedList.find((q: any) => q.queryText.trim().toLowerCase() === result.queryText.trim().toLowerCase());
+      if (item) {
+        deleteSavedQuery(item.id);
+      }
+      setIsSaved(false);
+    } else {
+      saveQuery({
+        queryText: result.queryText,
+        region: result.understood.region,
+        variable: result.understood.variable,
+        depth: result.understood.depth,
+        period: result.understood.period,
+        analysis: result.understood.analysis,
+        summary: result.summary,
+        observationCount: result.nlResponse?.count,
+        floatCount: result.nlResponse?.float_count,
+      });
+      setIsSaved(true);
+    }
+  };
+
+  const handleSaveVisualization = () => {
+    if (!primaryFloat) return;
+    saveVisualization({
+      title: `CTD Profile • Float #${primaryFloat.wmo}`,
+      type: "ts-profile",
+      region: result.understood.region,
+      floatId: primaryFloat.id,
+      cycleNumber: primaryFloat.lastCycle,
+      variable: result.understood.variable,
+      description: `Vertical temperature and salinity depth profile for ARGO float #${primaryFloat.wmo} in ${result.understood.region}.`,
+    });
+    setIsVisSaved(true);
+  };
 
   const isConversational =
     result.isConversational ||
@@ -46,7 +114,7 @@ export default function FloatChatMessage({
     result.isClarification ||
     nlResponse?.status === "clarification_needed";
 
-  // Conversational response rendering (Clean human response without scientific cards)
+  // Conversational response rendering
   if (isConversational) {
     return (
       <div className="flex items-start gap-3 my-4 pr-4 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -171,15 +239,40 @@ export default function FloatChatMessage({
             </span>
           </div>
 
-          {/* Understood Query Toggle */}
-          <button
-            onClick={() => setShowUnderstood(!showUnderstood)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#061c38]/80 hover:bg-[#0a2850] border border-cyan-500/25 text-[11px] font-medium text-cyan-300 transition-colors"
-          >
-            <Sparkles className="w-3 h-3 text-cyan-400" />
-            <span>Understood Query</span>
-            {showUnderstood ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Bookmark / Save Query Button */}
+            <button
+              onClick={handleToggleSaveQuery}
+              title={isSaved ? "Saved to Saved Queries" : "Save this query"}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all ${
+                isSaved
+                  ? "bg-cyan-500/25 border border-cyan-400 text-cyan-200 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
+                  : "bg-[#061c38]/80 hover:bg-[#0a2850] border border-cyan-500/25 text-slate-300 hover:text-white"
+              }`}
+            >
+              {isSaved ? (
+                <>
+                  <BookmarkCheck className="w-3 h-3 text-cyan-300" />
+                  <span>Saved</span>
+                </>
+              ) : (
+                <>
+                  <Bookmark className="w-3 h-3 text-cyan-400" />
+                  <span>Save Query</span>
+                </>
+              )}
+            </button>
+
+            {/* Understood Query Toggle */}
+            <button
+              onClick={() => setShowUnderstood(!showUnderstood)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#061c38]/80 hover:bg-[#0a2850] border border-cyan-500/25 text-[11px] font-medium text-cyan-300 transition-colors"
+            >
+              <Sparkles className="w-3 h-3 text-cyan-400" />
+              <span>Understood Query</span>
+              {showUnderstood ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          </div>
         </div>
 
         {/* Understood Query Breakdown */}
@@ -270,14 +363,37 @@ export default function FloatChatMessage({
                 <Layers className="w-3.5 h-3.5" />
                 Observation Profile ({obsResults.length} records)
               </span>
-              {primaryFloat && (
-                <button
-                  onClick={() => onSelectFloat(primaryFloat)}
-                  className="text-[11px] text-cyan-400 hover:text-cyan-200 underline font-mono-sci"
-                >
-                  Inspect Float #{primaryFloat.wmo}
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                {primaryFloat && (
+                  <button
+                    onClick={handleSaveVisualization}
+                    title="Save this chart to Visualizations gallery"
+                    className={`flex items-center gap-1 text-[11px] font-medium transition-colors ${
+                      isVisSaved ? "text-emerald-300" : "text-cyan-300 hover:text-white"
+                    }`}
+                  >
+                    {isVisSaved ? (
+                      <>
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Chart Saved</span>
+                      </>
+                    ) : (
+                      <>
+                        <BarChart3 className="w-3 h-3 text-cyan-400" />
+                        <span>Save Visualization</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                {primaryFloat && (
+                  <button
+                    onClick={() => onSelectFloat(primaryFloat)}
+                    className="text-[11px] text-cyan-400 hover:text-cyan-200 underline font-mono-sci"
+                  >
+                    Inspect Float #{primaryFloat.wmo}
+                  </button>
+                )}
+              </div>
             </div>
 
             <TSProfileChart
@@ -333,3 +449,4 @@ export default function FloatChatMessage({
     </div>
   );
 }
+

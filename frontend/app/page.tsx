@@ -42,13 +42,30 @@ export default function Home() {
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Load data-driven status on mount
+  // Load data-driven status and pending query on mount
   useEffect(() => {
     async function loadStatus() {
       const liveStatus = await getSystemStatus();
       setStatus(liveStatus);
     }
     loadStatus();
+
+    // Check for query passed in URL parameter or session storage
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const urlQuery = params.get("q");
+      const sessionQuery = sessionStorage.getItem("floatchat_pending_query");
+      const targetQuery = urlQuery || sessionQuery;
+
+      if (targetQuery) {
+        sessionStorage.removeItem("floatchat_pending_query");
+        // Clear url query without full reload
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setTimeout(() => {
+          handleSendMessage(decodeURIComponent(targetQuery));
+        }, 150);
+      }
+    }
   }, []);
 
   // Submit Query to Conversation Stream
