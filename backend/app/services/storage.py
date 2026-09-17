@@ -111,8 +111,9 @@ class StorageService:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
+                cursor.execute("DROP TABLE IF EXISTS argo_float_summary")
                 cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS argo_float_summary (
+                    CREATE TABLE argo_float_summary (
                         float_id TEXT PRIMARY KEY,
                         region TEXT NOT NULL,
                         first_observation TEXT NOT NULL,
@@ -120,14 +121,14 @@ class StorageService:
                         observation_count INTEGER NOT NULL,
                         profile_count INTEGER NOT NULL,
                         latest_latitude REAL NOT NULL,
-                        latest_longitude REAL NOT NULL
+                        latest_longitude REAL NOT NULL,
+                        max_depth REAL
                     )
                 """)
-                cursor.execute("DELETE FROM argo_float_summary")
                 cursor.execute("""
                     INSERT INTO argo_float_summary (
                         float_id, region, first_observation, last_observation,
-                        observation_count, profile_count, latest_latitude, latest_longitude
+                        observation_count, profile_count, latest_latitude, latest_longitude, max_depth
                     )
                     SELECT 
                         float_id,
@@ -137,7 +138,8 @@ class StorageService:
                         COUNT(*) as observation_count,
                         COUNT(DISTINCT cycle_number) as profile_count,
                         0.0 as latest_latitude,
-                        0.0 as latest_longitude
+                        0.0 as latest_longitude,
+                        MAX(depth_m) as max_depth
                     FROM argo_observations
                     GROUP BY float_id
                 """)

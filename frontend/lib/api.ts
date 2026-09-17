@@ -4,6 +4,7 @@ import {
   TrajectoryResponse,
   TrajectoryParams,
   ProfileAnalysisResponse,
+  VariableSummaryResponse,
   NLExecutionResponse,
   SystemStatus,
   QueryResult,
@@ -168,6 +169,56 @@ export async function getRegionSummaries(): Promise<RegionSummaryResponse> {
  * 2. GET /api/v1/visualization/trajectory
  * Retrieves real 3D/4D trajectory points for time-series / particle visualizations.
  */
+/**
+ * GET /api/v1/visualization/variable-summary
+ * Retrieves database-driven variable summary metrics and anomaly insights.
+ */
+export async function getVariableSummary(
+  variable: string,
+  region?: string
+): Promise<VariableSummaryResponse> {
+  const vClean = variable.toLowerCase().replace(/\s+/g, "_");
+  const rClean = region && region !== "All" ? region.toLowerCase().replace(/\s+/g, "_") : "all";
+  const cacheKey = `var_summary_${vClean}_${rClean}`;
+
+  const cached = getFromCache<VariableSummaryResponse>(cacheKey, 60000); // 60s TTL
+  if (cached) {
+    return cached;
+  }
+
+  const url = new URL(`${BACKEND_API_URL}/api/v1/visualization/variable-summary`);
+  url.searchParams.set("variable", vClean);
+  if (region && region !== "All") {
+    url.searchParams.set("region", rClean);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch variable summary (HTTP ${res.status}): ${res.statusText}`);
+    }
+
+    const data: VariableSummaryResponse = await res.json();
+    setInCache(cacheKey, data);
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error("Variable summary request timed out after 10s.");
+    }
+    throw err;
+  }
+}
+
 export async function getTrajectory(params?: TrajectoryParams): Promise<TrajectoryResponse> {
   const url = new URL(`${BACKEND_API_URL}/api/v1/visualization/trajectory`);
 
@@ -217,7 +268,7 @@ export async function executeNLQuery(
   const url = `${BACKEND_API_URL}/api/v1/nl-query/execute`;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
 
   try {
     const res = await fetch(url, {
@@ -465,12 +516,17 @@ export async function submitOceanQuery(
   }
 
   // Key Value Metrics extracted directly from real response (only for scientific queries)
+  const totalMatching = nlResponse.total_matching_count;
+  const obsUnit = totalMatching
+    ? `records (${totalMatching >= 10000 ? '10,000+' : totalMatching.toLocaleString()} total matching in DB)`
+    : "records";
+
   const keyValues: KeyValueMetric[] = (isConversational || isClarification)
     ? []
     : [
         { label: "Target Region", value: understoodQuery.region },
         { label: "Target Variable", value: understoodQuery.variable },
-        { label: "Observations", value: nlResponse.count.toLocaleString(), unit: "records" },
+        { label: "Observations", value: nlResponse.count.toLocaleString(), unit: obsUnit },
         { label: "Floats Represented", value: `${nlResponse.float_count}`, unit: "floats" },
         { label: "Execution Latency", value: `${nlResponse.total_latency_ms.toFixed(1)}`, unit: "ms" },
       ];
@@ -687,6 +743,8 @@ export async function getOceanInsightsSummary(params?: {
     }
     throw err;
   }
+}
+
 /**
  * 7. GET /api/visualizations/regions
  */

@@ -110,6 +110,38 @@ export interface TrajectoryParams {
   limit?: number;
 }
 
+export interface AnomalyAnalysisInfo {
+  is_available: boolean;
+  title: string;
+  status_label: string;
+  methodology: string;
+  total_observations_analyzed: number;
+  anomalous_observations_count: number;
+  anomaly_percentage: number;
+  z_score_threshold: number;
+  max_abs_z_score: number;
+  affected_regions: string[];
+  message: string;
+}
+
+export interface VariableSummaryResponse {
+  variable: string;
+  region?: string | null;
+  observation_count: number;
+  float_count: number;
+  profile_count: number;
+  min_val?: number | null;
+  max_val?: number | null;
+  avg_val?: number | null;
+  min_depth?: number | null;
+  max_depth?: number | null;
+  date_range: { start?: string | null; end?: string | null };
+  anomaly_analysis?: AnomalyAnalysisInfo | null;
+  provenance: ProvenanceInfo;
+  sqlite_db_latency_ms: number;
+  total_latency_ms: number;
+}
+
 /**
  * Real Profile Points & Analysis returned by GET /api/v1/profile/{float_id}/analysis
  */
@@ -231,9 +263,11 @@ export interface NLExecutionResponse {
   provenance: ProvenanceInfo;
   sqlite_db_latency_ms: number;
   total_latency_ms: number;
+  total_matching_count?: number;
   clarification?: string | null;
   confidence: number;
   conversational_response?: string | null;
+  response_language?: string | null;
 }
 
 /**

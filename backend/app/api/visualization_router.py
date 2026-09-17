@@ -18,6 +18,7 @@ from backend.app.models.visualization_schema import (
     ProfileVisualAnalysisResponse,
     AnomalyListResponse,
     ProvenanceDetailResponse,
+    VariableSummaryResponse,
 )
 from backend.app.services.query_service import QueryService
 
@@ -317,6 +318,28 @@ def get_visualization_provenance_endpoint(
 # 9. TRAJECTORY ENDPOINT (Backward-Compatible Particle Path Support)
 # -------------------------------------------------------------------------
 @router.get(
+    "/visualization/variable-summary",
+    response_model=VariableSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Retrieve database-driven variable summary metrics and anomaly analysis",
+    description="Returns aggregate min/max/avg, depth coverage, observation counts, and Z-score anomaly baseline analysis for Explore page variable filter buttons."
+)
+def get_visualization_variable_summary_endpoint(
+    variable: str = Query(..., description="Target variable name ('temperature', 'salinity', 'marine_heatwaves', 'thermocline', 'trajectories', 'all')"),
+    region: Optional[str] = Query(None, description="Optional region filter")
+) -> VariableSummaryResponse:
+    """Retrieve variable summary metrics and anomaly insights."""
+    try:
+        resp, _, _ = query_service.get_variable_summary(variable=variable, region=region)
+        return resp
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving variable summary: {str(e)}"
+        )
+
+
+@router.get(
     "/visualization/trajectory",
     response_model=TrajectoryResponse,
     status_code=status.HTTP_200_OK,
@@ -348,3 +371,4 @@ def get_visualization_trajectory_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving visualization trajectory data: {str(e)}"
         )
+
