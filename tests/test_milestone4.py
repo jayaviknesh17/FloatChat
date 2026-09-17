@@ -222,11 +222,16 @@ def test_profile_analysis_endpoint_real_db():
 def test_provenance_model_fields():
     """Verify ProvenanceInfo schema fields explicitly."""
     prov = ProvenanceInfo(
+        data_source="Real ARGO GDAC Core Profiles",
+        source_type="Real ARGO NetCDF (*.nc / *_prof.nc) via SQLite",
         float_ids=["5904313"],
         cycle_numbers=[1, 2],
         variables=["temperature", "salinity"],
-        region="Bay of Bengal"
+        region="Bay of Bengal",
+        date_range={},
+        processing_qc_notes="Only QC flags 1 (Good) and 2 (Probably Good) retained."
     )
+
 
     d = prov.model_dump()
     assert "data_source" in d

@@ -49,42 +49,50 @@ class TestConversationalMultilingual:
         res = nl_service.parse_query("Hi")
         assert res.status == "conversational"
         assert res.response_language == "en"
+        assert res.conversational_response is not None
         assert "FloatChat" in res.conversational_response
 
     def test_english_capability(self):
         res = nl_service.parse_query("What can you do?")
         assert res.status == "conversational"
         assert res.response_language == "en"
+        assert res.conversational_response is not None
         assert "ARGO" in res.conversational_response
 
     def test_english_explanation(self):
         res = nl_service.parse_query("What is thermocline?")
         assert res.status == "conversational"
         assert res.response_language == "en"
+        assert res.conversational_response is not None
         assert "thermocline" in res.conversational_response.lower()
+
 
     def test_tamil_greetings(self):
         res = nl_service.parse_query("வணக்கம்")
         assert res.status == "conversational"
         assert res.response_language == "ta"
+        assert res.conversational_response is not None
         assert any(w in res.conversational_response for w in ["வணக்கம்", "FloatChat", "welcome", "heyy"])
 
     def test_tamil_switch(self):
         res = nl_service.parse_query("தமிழில் சொல்லு")
         assert res.status == "conversational"
         assert res.response_language == "ta"
+        assert res.conversational_response is not None
         assert "FloatChat" in res.conversational_response
 
     def test_hindi_greetings(self):
         res = nl_service.parse_query("नमस्ते")
         assert res.status == "conversational"
         assert res.response_language == "hi"
+        assert res.conversational_response is not None
         assert any(w in res.conversational_response for w in ["नमस्ते", "FloatChat", "swagat", "hey"])
 
     def test_hindi_switch(self):
         res = nl_service.parse_query("हिंदी में बताओ")
         assert res.status == "conversational"
         assert res.response_language == "hi"
+        assert res.conversational_response is not None
         assert "FloatChat" in res.conversational_response
 
 
@@ -95,6 +103,7 @@ class TestMixedLanguageScientificQuerying:
         res = nl_service.parse_query("Bay of Bengal la temperature kaatu")
         assert res.status == "success"
         assert res.response_language == "ta"
+        assert res.interpreted_query is not None
         assert res.interpreted_query["region"] == "Bay of Bengal"
         assert res.interpreted_query["variable"] == "temperature"
 
@@ -102,6 +111,7 @@ class TestMixedLanguageScientificQuerying:
         res = nl_service.parse_query("Arabian Sea ka salinity data dikhao")
         assert res.status == "success"
         assert res.response_language == "hi"
+        assert res.interpreted_query is not None
         assert res.interpreted_query["region"] == "Arabian Sea"
         assert res.interpreted_query["variable"] == "salinity"
 
@@ -115,6 +125,7 @@ class TestScientificExecutionAndMultilingualSummaries:
         assert exec_res.response_language == "en"
         assert exec_res.count > 0
         assert exec_res.float_count > 0
+        assert exec_res.conversational_response is not None
         assert any(w in exec_res.conversational_response for w in ["Got it!", "Sure", "pulled", "found"])
         assert "Bay of Bengal" in exec_res.conversational_response
         # Check raw scientific data payload present and unchanged
@@ -127,6 +138,7 @@ class TestScientificExecutionAndMultilingualSummaries:
         assert exec_res.status == "success"
         assert exec_res.response_language == "ta"
         assert exec_res.count > 0
+        assert exec_res.conversational_response is not None
         assert any(w in exec_res.conversational_response for w in ["சரி!", "Sure da", "Bay of Bengal"])
         assert "Bay of Bengal" in exec_res.conversational_response
 
@@ -135,6 +147,7 @@ class TestScientificExecutionAndMultilingualSummaries:
         assert exec_res.status == "success"
         assert exec_res.response_language == "hi"
         assert exec_res.count > 0
+        assert exec_res.conversational_response is not None
         assert any(w in exec_res.conversational_response for w in ["समझ गया!", "Bilkul", "Arabian Sea"])
         assert "Arabian Sea" in exec_res.conversational_response
 
@@ -143,15 +156,18 @@ class TestScientificExecutionAndMultilingualSummaries:
         assert exec_res.status == "success"
         assert exec_res.count > 0
         assert exec_res.anomaly_summary is not None
+        assert exec_res.conversational_response is not None
         assert "temperature anomaly" in exec_res.conversational_response.lower()
 
     def test_float_id_query_preservation(self):
         exec_res = query_service.execute_nl_query("Show data for float 2902236")
         assert exec_res.status == "success"
         assert exec_res.count > 0
+        assert exec_res.conversational_response is not None
         assert "2902236" in exec_res.conversational_response
         for r in exec_res.results:
             assert str(r["float_id"]) == "2902236"
+
 
     def test_api_nl_query_execute_endpoint(self):
         resp = client.post("/api/v1/nl-query/execute", json={"query": "Bay of Bengal la temperature kaatu"})

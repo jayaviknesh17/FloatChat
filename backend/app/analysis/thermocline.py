@@ -25,11 +25,13 @@ def detect_thermocline(levels: List[Dict[str, Any]]) -> Dict[str, Any]:
         Dict containing estimated thermocline depth, max gradient, and profile level gradients.
     """
     # Filter valid temperature levels and sort by depth
-    valid_levels = [
-        lvl for lvl in levels
-        if lvl.get("depth_m") is not None and lvl.get("temperature_c") is not None
-        and not math.isnan(lvl.get("temperature_c"))
-    ]
+    valid_levels = []
+    for lvl in levels:
+        d = lvl.get("depth_m")
+        t = lvl.get("temperature_c")
+        if d is not None and t is not None and not math.isnan(t):
+            valid_levels.append(lvl)
+
     valid_levels.sort(key=lambda x: x["depth_m"])
 
     if len(valid_levels) < 2:

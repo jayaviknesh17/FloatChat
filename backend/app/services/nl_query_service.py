@@ -337,8 +337,11 @@ class NLQueryService:
             return NLQueryOutput(
                 original_query=query_text or "",
                 status="clarification_needed",
+                interpreted_query=None,
+                filters_applied=[],
                 clarification="Query cannot be empty. Please ask an oceanographic question (e.g., 'Show temperature in Bay of Bengal').",
                 confidence=0.0,
+                conversational_response=None,
                 response_language="en"
             )
 
@@ -359,6 +362,9 @@ class NLQueryService:
             return NLQueryOutput(
                 original_query=ctx.original_query,
                 status="conversational",
+                interpreted_query=None,
+                filters_applied=[],
+                clarification=None,
                 conversational_response=offline_reply,
                 confidence=1.0,
                 response_language=lang
@@ -378,8 +384,11 @@ class NLQueryService:
                 return NLQueryOutput(
                     original_query=ctx.original_query,
                     status="clarification_needed",
+                    interpreted_query=None,
+                    filters_applied=[],
                     clarification=clar,
                     confidence=0.0,
+                    conversational_response=None,
                     response_language=lang
                 )
 
@@ -420,10 +429,14 @@ class NLQueryService:
             return NLQueryOutput(
                 original_query=ctx.original_query,
                 status="clarification_needed",
+                interpreted_query=None,
+                filters_applied=[],
                 clarification=clar,
                 confidence=0.0,
+                conversational_response=None,
                 response_language=lang
             )
+
 
         if settings.GEMINI_API_KEY and settings.LLM_PROVIDER == "gemini":
             try:
@@ -569,6 +582,9 @@ Task: Respond to the user naturally and concisely as FloatChat in target languag
                 return NLQueryOutput(
                     original_query=ctx.original_query,
                     status="conversational",
+                    interpreted_query=None,
+                    filters_applied=[],
+                    clarification=None,
                     conversational_response=raw_content,
                     confidence=1.0,
                     response_language=ctx.response_language
@@ -774,10 +790,14 @@ Rules:
                 return NLQueryOutput(
                     original_query=text,
                     status="clarification_needed",
+                    interpreted_query=None,
+                    filters_applied=[],
                     clarification=parsed_json.get("clarification") or "Query is ambiguous. Please specify region or variable.",
                     confidence=0.5,
+                    conversational_response=None,
                     response_language=lang
                 )
+
 
             return self._validate_and_build_output(text, parsed_json, lang)
 
@@ -806,10 +826,15 @@ Rules:
                 filters_applied.append("start_date")
             if raw_params.get("end_date"):
                 filters_applied.append("end_date")
-            if raw_params.get("depth_min") is not None and raw_params.get("depth_min") > 0:
+
+            d_min = raw_params.get("depth_min")
+            if d_min is not None and isinstance(d_min, (int, float)) and d_min > 0:
                 filters_applied.append("depth_min")
-            if raw_params.get("depth_max") is not None and raw_params.get("depth_max") < 12000:
+
+            d_max = raw_params.get("depth_max")
+            if d_max is not None and isinstance(d_max, (int, float)) and d_max < 12000:
                 filters_applied.append("depth_max")
+
             if raw_params.get("float_id"):
                 filters_applied.append("float_id")
             if raw_params.get("cycle_number") is not None:
@@ -822,21 +847,29 @@ Rules:
                 filters_applied=filters_applied,
                 clarification=None,
                 confidence=0.95,
+                conversational_response=None,
                 response_language=lang
             )
         except ValueError as ve:
             return NLQueryOutput(
                 original_query=original_query,
                 status="clarification_needed",
+                interpreted_query=None,
+                filters_applied=[],
                 clarification=f"Invalid query parameter: {str(ve)}",
                 confidence=0.0,
+                conversational_response=None,
                 response_language=lang
             )
         except Exception as e:
             return NLQueryOutput(
                 original_query=original_query,
                 status="error",
+                interpreted_query=None,
+                filters_applied=[],
                 clarification=f"Failed to validate query: {str(e)}",
                 confidence=0.0,
+                conversational_response=None,
                 response_language=lang
             )
+

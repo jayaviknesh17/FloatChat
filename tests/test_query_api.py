@@ -21,9 +21,12 @@ def test_schema_valid_query():
         variable="temperature",
         start_date="2024-01-01",
         end_date="2024-06-30",
-        depth_min=0,
-        depth_max=1000,
-        analysis="observations"
+        depth_min=0.0,
+        depth_max=1000.0,
+        analysis="observations",
+        float_id=None,
+        cycle_number=None,
+        limit=1000
     )
     assert req.region == "Bay of Bengal"
     assert req.variable == "temperature"
@@ -33,28 +36,23 @@ def test_schema_valid_query():
 
 def test_schema_invalid_region():
     with pytest.raises(ValueError, match="Unsupported region"):
-        QueryRequest(region="pacific_ocean")
+        QueryRequest(region="pacific_ocean", variable="both", start_date=None, end_date=None, depth_min=0.0, depth_max=12000.0, float_id=None, cycle_number=None, analysis="observations", limit=1000)
 
 
 def test_schema_invalid_variable():
     with pytest.raises(ValueError, match="Unsupported variable"):
-        QueryRequest(variable="density")
+        QueryRequest(region=None, variable="density", start_date=None, end_date=None, depth_min=0.0, depth_max=12000.0, float_id=None, cycle_number=None, analysis="observations", limit=1000)
 
 
 def test_schema_invalid_date_range():
     with pytest.raises(ValueError, match="start_date .* cannot be after end_date"):
-        QueryRequest(start_date="2024-06-30", end_date="2024-01-01")
+        QueryRequest(region=None, variable="both", start_date="2024-06-30", end_date="2024-01-01", depth_min=0.0, depth_max=12000.0, float_id=None, cycle_number=None, analysis="observations", limit=1000)
 
-
-test_depth_max_less_than_min = """
-def test_schema_invalid_depth_range():
-    with pytest.raises(ValueError, match="depth_min .* cannot be greater than depth_max"):
-        QueryRequest(depth_min=1000, depth_max=500)
-"""
 
 def test_schema_invalid_depth_range():
     with pytest.raises(ValueError, match="depth_min .* cannot be greater than depth_max"):
-        QueryRequest(depth_min=1000.0, depth_max=500.0)
+        QueryRequest(region=None, variable="both", start_date=None, end_date=None, depth_min=1000.0, depth_max=500.0, float_id=None, cycle_number=None, analysis="observations", limit=1000)
+
 
 
 # =====================================================================

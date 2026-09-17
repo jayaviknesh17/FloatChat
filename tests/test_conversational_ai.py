@@ -23,6 +23,7 @@ class TestConversationalAIToneAndMultilingual:
         r2 = nl_service.parse_query("hello")
         assert r1.status == "conversational"
         assert r2.status == "conversational"
+        assert r1.conversational_response is not None
         assert "FloatChat" in r1.conversational_response
         assert "explore" in r1.conversational_response.lower()
 
@@ -30,18 +31,21 @@ class TestConversationalAIToneAndMultilingual:
         res = nl_service.parse_query("vanakkam")
         assert res.status == "conversational"
         assert res.response_language == "ta"
+        assert res.conversational_response is not None
         assert any(w in res.conversational_response.lower() for w in ["welcome", "float", "explore", "வணக்கம்", "heyy"])
 
     def test_hinglish_greeting(self):
         res = nl_service.parse_query("namaste")
         assert res.status == "conversational"
         assert res.response_language == "hi"
+        assert res.conversational_response is not None
         assert any(w in res.conversational_response.lower() for w in ["swagat", "explore", "नमस्ते", "hey"])
 
     def test_english_concept_explanation(self):
         res = nl_service.parse_query("What is thermocline?")
         assert res.status == "conversational"
         assert res.response_language == "en"
+        assert res.conversational_response is not None
         assert "layer" in res.conversational_response.lower()
         assert "depth" in res.conversational_response.lower()
 
@@ -49,12 +53,14 @@ class TestConversationalAIToneAndMultilingual:
         res = nl_service.parse_query("Thermocline na enna?")
         assert res.status == "conversational"
         assert res.response_language == "ta"
+        assert res.conversational_response is not None
         assert "thermocline" in res.conversational_response.lower()
 
     def test_hinglish_concept_explanation(self):
         res = nl_service.parse_query("Thermocline क्या है?")
         assert res.status == "conversational"
         assert res.response_language == "hi"
+        assert res.conversational_response is not None
         assert "thermocline" in res.conversational_response.lower()
 
 
@@ -69,6 +75,7 @@ class TestContextAwareness:
         res = nl_service.parse_query("Bay of Bengal la irukuma?", history=history)
         assert res.status == "conversational"
         assert res.response_language == "ta"
+        assert res.conversational_response is not None
         assert "bay of bengal" in res.conversational_response.lower()
         assert "thermocline" in res.conversational_response.lower()
 
@@ -83,6 +90,7 @@ class TestContextAwareness:
 
         res = nl_service.parse_query("bay of bengal la irukuma?", history=history)
         assert res.status == "conversational"
+        assert res.conversational_response is not None
         assert "bay of bengal" in res.conversational_response.lower()
         assert "thermocline" in res.conversational_response.lower()
         assert "primary indian ocean regions" not in res.conversational_response.lower()
@@ -101,6 +109,7 @@ class TestContextAwareness:
 
         res = nl_service.parse_query("exact depth sollu", history=history)
         assert res.status == "conversational"
+        assert res.conversational_response is not None
         assert "profile" in res.conversational_response.lower()
         assert "select" in res.conversational_response.lower() or "சொல்லணும்னா" in res.conversational_response
 
@@ -117,6 +126,7 @@ class TestContextAwareness:
 
         exec_res = query_service.execute_nl_query("anomaly irukka?", history=history)
         assert exec_res.status == "success"
+        assert exec_res.interpreted_query is not None
         assert exec_res.interpreted_query["region"] in ["bay_of_bengal", "Bay of Bengal"]
         assert exec_res.interpreted_query["variable"] == "temperature"
         assert exec_res.interpreted_query["analysis"] == "anomaly"
@@ -142,6 +152,7 @@ class TestScientificExecutionAndPayloadIntegrity:
         assert exec_res.status == "success"
         assert exec_res.count > 0
         assert exec_res.response_language == "en"
+        assert exec_res.conversational_response is not None
         assert "Bay of Bengal" in exec_res.conversational_response
         assert str(exec_res.count) in exec_res.conversational_response or f"{exec_res.count:,}" in exec_res.conversational_response
         assert len(exec_res.results) == exec_res.count
@@ -151,6 +162,7 @@ class TestScientificExecutionAndPayloadIntegrity:
         assert exec_res.status == "success"
         assert exec_res.count > 0
         assert exec_res.response_language == "ta"
+        assert exec_res.conversational_response is not None
         assert "Bay of Bengal" in exec_res.conversational_response
         assert len(exec_res.results) == exec_res.count
 
@@ -159,8 +171,10 @@ class TestScientificExecutionAndPayloadIntegrity:
         assert exec_res.status == "success"
         assert exec_res.count > 0
         assert exec_res.response_language == "hi"
+        assert exec_res.conversational_response is not None
         assert "Arabian Sea" in exec_res.conversational_response
         assert len(exec_res.results) == exec_res.count
+
 
     def test_api_nl_query_execute_with_history(self):
         payload = {

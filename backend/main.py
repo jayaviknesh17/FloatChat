@@ -54,5 +54,3 @@ def root():
         "trajectory_endpoint": "/api/v1/visualization/trajectory",
         "floats_endpoint": "/api/v1/visualization/floats"
     }
-
-

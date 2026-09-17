@@ -488,8 +488,10 @@ class QueryService:
                 status=parsed.status,
                 interpreted_query=parsed.interpreted_query,
                 count=0,
+                float_count=0,
                 results=[],
                 anomaly_summary=None,
+
                 provenance=ProvenanceInfo(
                     data_source="Real ARGO GDAC Core Profiles",
                     source_type="Real ARGO NetCDF (*.nc / *_prof.nc) via SQLite",

@@ -23,11 +23,13 @@ def detect_salinity_gradient(levels: List[Dict[str, Any]]) -> Dict[str, Any]:
         Dict containing estimated halocline depth, max gradient, and profile level gradients.
     """
     # Filter valid salinity levels and sort by depth
-    valid_levels = [
-        lvl for lvl in levels
-        if lvl.get("depth_m") is not None and lvl.get("salinity_psu") is not None
-        and not math.isnan(lvl.get("salinity_psu"))
-    ]
+    valid_levels = []
+    for lvl in levels:
+        d = lvl.get("depth_m")
+        s = lvl.get("salinity_psu")
+        if d is not None and s is not None and not math.isnan(s):
+            valid_levels.append(lvl)
+
     valid_levels.sort(key=lambda x: x["depth_m"])
 
     if len(valid_levels) < 2:

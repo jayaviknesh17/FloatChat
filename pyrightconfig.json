@@ -1,0 +1,21 @@
+{
+  "venvPath": "C:/Users/sgjay/AppData/Local/Python",
+  "venv": "pythoncore-3.14-64",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "C:/Users/sgjay/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages",
+        ".venv/Lib/site-packages",
+        ".",
+        "backend"
+      ]
+    }
+  ],
+  "extraPaths": [
+    "C:/Users/sgjay/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages",
+    ".venv/Lib/site-packages",
+    ".",
+    "backend"
+  ]
+}

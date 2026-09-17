@@ -31,5 +31,6 @@ def test_out_of_bounds_coords():
 
 
 def test_invalid_coords():
-    assert classify_region(None, 85.0) is None
-    assert classify_region("invalid", 85.0) is None
+    assert classify_region(None, 85.0) is None  # type: ignore
+    assert classify_region("invalid", 85.0) is None  # type: ignore
+
