@@ -58,3 +58,29 @@ class FloatSummaryResponse(BaseModel):
     provenance: ProvenanceInfo = Field(..., description="Data provenance metadata")
     sqlite_db_latency_ms: float = Field(..., description="SQLite query execution latency in ms")
     total_latency_ms: float = Field(..., description="Total API endpoint processing latency in ms")
+
+
+class RegionSummaryItem(BaseModel):
+    """Summary item for global ocean region exploration cards."""
+
+    region_id: str = Field(..., description="Canonical region identifier (e.g. western_pacific)")
+    name: str = Field(..., description="Display name of region (e.g. Western Pacific)")
+    float_count: int = Field(..., description="Number of unique ARGO floats in region")
+    profile_count: int = Field(..., description="Total profile cycles in region")
+    observation_count: int = Field(..., description="Total observation levels recorded")
+    latest_profile_date: Optional[str] = Field(None, description="ISO timestamp or date of most recent profile")
+    has_data: bool = Field(..., description="Whether real ARGO float data exists in current dataset")
+    source: str = Field("Real ARGO GDAC", description="Data source provenance indicator")
+
+
+class RegionSummaryResponse(BaseModel):
+    """API response payload for GET /api/v1/visualization/regions."""
+
+    total_regions: int = Field(..., description="Total canonical regions evaluated (12)")
+    regions_with_data: int = Field(..., description="Number of regions containing at least one real float")
+    total_floats: int = Field(..., description="Total distinct floats across all regions")
+    regions: List[RegionSummaryItem] = Field(..., description="List of region summary objects for all 12 canonical regions")
+    provenance: ProvenanceInfo = Field(..., description="Data provenance metadata")
+    sqlite_db_latency_ms: float = Field(..., description="SQLite query execution latency in ms")
+    total_latency_ms: float = Field(..., description="Total API endpoint processing latency in ms")
+

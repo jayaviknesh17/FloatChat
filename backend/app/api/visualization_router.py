@@ -5,7 +5,11 @@ FastAPI router for 3D/4D trajectory visualization and float summary endpoints.
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
-from backend.app.models.visualization_schema import TrajectoryResponse, FloatSummaryResponse
+from backend.app.models.visualization_schema import (
+    TrajectoryResponse,
+    FloatSummaryResponse,
+    RegionSummaryResponse,
+)
 from backend.app.services.query_service import QueryService
 
 router = APIRouter()
@@ -64,3 +68,29 @@ def get_visualization_floats_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving visualization floats: {str(e)}"
         )
+
+
+@router.get(
+    "/visualization/regions",
+    response_model=RegionSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Retrieve database-driven summary counts for all 12 canonical global ocean regions",
+    description="Returns real float counts, profile counts, observation counts, and latest profile dates across all 12 supported regions."
+)
+@router.get(
+    "/regions",
+    response_model=RegionSummaryResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False
+)
+def get_visualization_regions_endpoint() -> RegionSummaryResponse:
+    """Retrieve region summary metrics for Explorer page region cards and drawers."""
+    try:
+        resp, _, _ = query_service.get_region_summaries()
+        return resp
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving region summaries: {str(e)}"
+        )
+

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { ProfileLevel, TemperatureProfilePoint, SalinityProfilePoint } from "@/lib/types";
 
 interface TSProfileChartProps {
@@ -23,33 +23,43 @@ export default function TSProfileChart({
   const [activeMetric, setActiveMetric] = useState<"both" | "temperature" | "salinity">("both");
   const [hoveredPoint, setHoveredPoint] = useState<{ depth: number; temp?: number; sal?: number } | null>(null);
 
-  // Normalize points from either backend profile analysis or legacy levels
-  const rawTempPoints: { depth: number; temp: number }[] =
-    temperatureProfile && temperatureProfile.length > 0
-      ? temperatureProfile.map((p) => ({ depth: p.depth_m, temp: p.temperature_c }))
-      : levels && levels.length > 0
-      ? levels.map((l) => ({ depth: l.depth, temp: l.temperature }))
-      : [];
+  // Normalize points from either backend profile analysis or legacy levels using useMemo for stability
+  const rawTempPoints = useMemo<{ depth: number; temp: number }[]>(() => {
+    if (temperatureProfile && temperatureProfile.length > 0) {
+      return temperatureProfile.map((p) => ({ depth: p.depth_m, temp: p.temperature_c }));
+    }
+    if (levels && levels.length > 0) {
+      return levels.map((l) => ({ depth: l.depth, temp: l.temperature }));
+    }
+    return [];
+  }, [temperatureProfile, levels]);
 
-  const rawSalPoints: { depth: number; sal: number }[] =
-    salinityProfile && salinityProfile.length > 0
-      ? salinityProfile.map((p) => ({ depth: p.depth_m, sal: p.salinity_psu }))
-      : levels && levels.length > 0
-      ? levels.map((l) => ({ depth: l.depth, sal: l.salinity }))
-      : [];
+  const rawSalPoints = useMemo<{ depth: number; sal: number }[]>(() => {
+    if (salinityProfile && salinityProfile.length > 0) {
+      return salinityProfile.map((p) => ({ depth: p.depth_m, sal: p.salinity_psu }));
+    }
+    if (levels && levels.length > 0) {
+      return levels.map((l) => ({ depth: l.depth, sal: l.salinity }));
+    }
+    return [];
+  }, [salinityProfile, levels]);
+
+  const handlePointHover = useCallback((point: { depth: number; temp?: number; sal?: number } | null) => {
+    setHoveredPoint(point);
+  }, []);
 
   if (rawTempPoints.length === 0 && rawSalPoints.length === 0) {
     return (
       <div className="h-64 flex items-center justify-center text-xs text-slate-400 bg-[#041124]/90 rounded-xl border border-cyan-500/20">
-        No profile levels available.
+        No vertical CTD profile levels available.
       </div>
     );
   }
 
-  // Chart dimensions & scaling
+  // Chart dimensions & scaling (Fixed predictable bounding geometry)
   const width = 460;
-  const height = 320;
-  const padding = { top: 30, right: 35, bottom: 40, left: 55 };
+  const height = 310;
+  const padding = { top: 25, right: 35, bottom: 35, left: 55 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
 
@@ -79,14 +89,26 @@ export default function TSProfileChart({
 
   const depthTicks = [0, 200, 500, 1000, 1500, 2000].filter((d) => d <= maxDepth);
 
+  // Subsample points for performance & interaction stability
+  const sampledTempPoints = rawTempPoints.filter(
+    (_, i) => i % Math.max(1, Math.floor(rawTempPoints.length / 35)) === 0
+  );
+  const sampledSalPoints = rawSalPoints.filter(
+    (_, i) => i % Math.max(1, Math.floor(rawSalPoints.length / 35)) === 0
+  );
+
   return (
-    <div className="p-4 rounded-xl bg-[#041124]/90 border border-cyan-500/20 shadow-inner">
-      {/* Chart Top Controls & Legend */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <div className="flex items-center gap-2 text-xs">
+    <div
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      className="p-4 rounded-xl bg-[#041124]/95 border border-cyan-500/25 shadow-inner select-none h-[380px] flex flex-col justify-between"
+    >
+      {/* Chart Controls & Persistent Height Hover Readout Header */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 shrink-0">
+        <div className="flex items-center gap-1.5 text-xs">
           <button
             onClick={() => setActiveMetric("both")}
-            className={`px-2.5 py-1 rounded-lg transition-colors ${
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
               activeMetric === "both"
                 ? "bg-cyan-900/60 text-cyan-200 border border-cyan-500/40"
                 : "text-slate-400 hover:text-white"
@@ -96,43 +118,49 @@ export default function TSProfileChart({
           </button>
           <button
             onClick={() => setActiveMetric("temperature")}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors ${
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
               activeMetric === "temperature"
                 ? "bg-rose-950/60 text-rose-300 border border-rose-500/40"
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-400" />
-            Temperature (°C)
+            <span className="w-2 h-2 rounded-full bg-rose-400" />
+            Temp (°C)
           </button>
           <button
             onClick={() => setActiveMetric("salinity")}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg transition-colors ${
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
               activeMetric === "salinity"
                 ? "bg-cyan-950/60 text-cyan-300 border border-cyan-500/40"
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
-            Salinity (PSU)
+            <span className="w-2 h-2 rounded-full bg-cyan-400" />
+            Sal (PSU)
           </button>
         </div>
 
-        {/* Hovered Point Info */}
-        {hoveredPoint && (
-          <div className="text-[11px] font-mono-sci text-cyan-300 bg-cyan-950/70 px-2 py-0.5 rounded border border-cyan-500/30">
-            {hoveredPoint.depth.toFixed(1)}m
-            {hoveredPoint.temp !== undefined && ` | ${hoveredPoint.temp.toFixed(2)}°C`}
-            {hoveredPoint.sal !== undefined && ` | ${hoveredPoint.sal.toFixed(2)} PSU`}
-          </div>
-        )}
+        {/* Persistent Fixed Height Readout to prevent layout shift */}
+        <div className="h-6 flex items-center min-w-[140px] justify-end">
+          {hoveredPoint ? (
+            <div className="text-[10.5px] font-mono-sci text-cyan-300 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-500/40 animate-in fade-in duration-75">
+              {hoveredPoint.depth.toFixed(1)}m
+              {hoveredPoint.temp !== undefined && ` | ${hoveredPoint.temp.toFixed(2)}°C`}
+              {hoveredPoint.sal !== undefined && ` | ${hoveredPoint.sal.toFixed(2)} PSU`}
+            </div>
+          ) : (
+            <span className="text-[10px] text-slate-400/80 font-mono-sci">
+              Hover curve for values
+            </span>
+          )}
+        </div>
       </div>
 
-      {/* SVG Scientific Depth Profile Plot */}
-      <div className="relative w-full overflow-hidden flex justify-center">
+      {/* SVG Scientific Depth Profile Plot Container */}
+      <div className="relative w-full h-[310px] overflow-hidden flex justify-center items-center">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full max-w-[460px] h-auto overflow-visible select-none"
+          className="w-full h-full max-w-[460px] max-h-[310px] overflow-hidden select-none"
         >
           {/* Depth Grid Lines */}
           {depthTicks.map((d) => {
@@ -152,7 +180,7 @@ export default function TSProfileChart({
                   y={y + 3}
                   textAnchor="end"
                   fill="#94a3b8"
-                  fontSize="10"
+                  fontSize="9.5"
                   fontFamily="monospace"
                 >
                   {d}m
@@ -220,7 +248,6 @@ export default function TSProfileChart({
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="drop-shadow-[0_0_8px_rgba(244,63,94,0.5)]"
             />
           )}
 
@@ -233,48 +260,45 @@ export default function TSProfileChart({
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]"
             />
           )}
 
-          {/* Data Points (Sampled for responsiveness) */}
-          {rawTempPoints
-            .filter((_, i) => i % Math.max(1, Math.floor(rawTempPoints.length / 40)) === 0)
-            .map((p, idx) => (
+          {/* Data Points (Sampled for smooth hover) */}
+          {(activeMetric === "both" || activeMetric === "temperature") &&
+            sampledTempPoints.map((p, idx) => (
               <circle
                 key={`t-${idx}`}
                 cx={getTempX(p.temp)}
                 cy={getY(p.depth)}
                 r="3"
                 fill="#f43f5e"
-                className="hover:r-5 transition-all cursor-pointer"
-                onMouseEnter={() => setHoveredPoint({ depth: p.depth, temp: p.temp })}
-                onMouseLeave={() => setHoveredPoint(null)}
+                className="cursor-pointer"
+                onMouseEnter={() => handlePointHover({ depth: p.depth, temp: p.temp })}
+                onMouseLeave={() => handlePointHover(null)}
               />
             ))}
 
-          {rawSalPoints
-            .filter((_, i) => i % Math.max(1, Math.floor(rawSalPoints.length / 40)) === 0)
-            .map((p, idx) => (
+          {(activeMetric === "both" || activeMetric === "salinity") &&
+            sampledSalPoints.map((p, idx) => (
               <circle
                 key={`s-${idx}`}
                 cx={getSalX(p.sal)}
                 cy={getY(p.depth)}
                 r="3"
                 fill="#22d3ee"
-                className="hover:r-5 transition-all cursor-pointer"
-                onMouseEnter={() => setHoveredPoint({ depth: p.depth, sal: p.sal })}
-                onMouseLeave={() => setHoveredPoint(null)}
+                className="cursor-pointer"
+                onMouseEnter={() => handlePointHover({ depth: p.depth, sal: p.sal })}
+                onMouseLeave={() => handlePointHover(null)}
               />
             ))}
 
           {/* Axis Labels */}
           <text
             x={padding.left + plotWidth / 2}
-            y={height - 8}
+            y={height - 6}
             textAnchor="middle"
             fill="#94a3b8"
-            fontSize="10"
+            fontSize="9.5"
             fontFamily="system-ui"
           >
             Temperature (0–35°C) / Salinity (30–38 PSU)
@@ -284,7 +308,7 @@ export default function TSProfileChart({
             y={padding.top + plotHeight / 2}
             textAnchor="middle"
             fill="#94a3b8"
-            fontSize="10"
+            fontSize="9.5"
             fontFamily="system-ui"
             transform={`rotate(-90, 14, ${padding.top + plotHeight / 2})`}
           >

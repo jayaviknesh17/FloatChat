@@ -1,0 +1,3 @@
+"""
+FloatChat backend scripts package.
+"""

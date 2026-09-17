@@ -42,6 +42,30 @@ export interface FloatSummaryResponse {
 }
 
 /**
+ * Region summary item returned by GET /api/v1/visualization/regions
+ */
+export interface RegionSummaryItem {
+  region_id: string;
+  name: string;
+  float_count: number;
+  profile_count: number;
+  observation_count: number;
+  latest_profile_date?: string | null;
+  has_data: boolean;
+  source: string;
+}
+
+export interface RegionSummaryResponse {
+  total_regions: number;
+  regions_with_data: number;
+  total_floats: number;
+  regions: RegionSummaryItem[];
+  provenance: ProvenanceInfo;
+  sqlite_db_latency_ms: number;
+  total_latency_ms: number;
+}
+
+/**
  * Real ARGO 3D/4D trajectory point returned by GET /api/v1/visualization/trajectory
  */
 export interface TrajectoryPoint {

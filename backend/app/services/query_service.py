@@ -27,6 +27,8 @@ from backend.app.models.visualization_schema import (
     TrajectoryResponse,
     FloatSummaryItem,
     FloatSummaryResponse,
+    RegionSummaryItem,
+    RegionSummaryResponse,
 )
 from backend.app.analysis.anomaly_detector import detect_anomalies
 
@@ -47,6 +49,8 @@ class QueryService:
         self.db_path = Path(db_path)
         if not self.db_path.exists():
             logger.warning(f"Database file not found at {self.db_path}. Queries will return empty results.")
+        self._region_summaries_cache: Optional[Tuple[RegionSummaryResponse, float, float]] = None
+        self._region_summaries_timestamp: float = 0.0
 
     def _get_connection(self) -> sqlite3.Connection:
         """Create a read-only URI connection to SQLite for thread safety and maximum concurrency."""
@@ -739,19 +743,22 @@ class QueryService:
         for r in rows:
             fid = str(r["float_id"])
             float_ids_set.add(fid)
-            t_str = str(r["profile_time"])
-            times.append(t_str)
-            lats.append(r["latitude"])
-            lons.append(r["longitude"])
+            t_str = str(r["profile_time"]) if r["profile_time"] else ""
+            if t_str:
+                times.append(t_str)
+            if r["latitude"] is not None:
+                lats.append(float(r["latitude"]))
+            if r["longitude"] is not None:
+                lons.append(float(r["longitude"]))
 
             points.append(TrajectoryPoint(
                 float_id=fid,
-                cycle_number=int(r["cycle_number"]),
+                cycle_number=int(r["cycle_number"]) if r["cycle_number"] is not None else 0,
                 timestamp=t_str,
-                latitude=float(r["latitude"]),
-                longitude=float(r["longitude"]),
-                pressure_dbar=float(r["pressure_dbar"]),
-                depth_m=float(r["depth_m"]),
+                latitude=float(r["latitude"]) if r["latitude"] is not None else 0.0,
+                longitude=float(r["longitude"]) if r["longitude"] is not None else 0.0,
+                pressure_dbar=float(r["pressure_dbar"]) if r["pressure_dbar"] is not None else 0.0,
+                depth_m=float(r["depth_m"]) if r["depth_m"] is not None else 0.0,
                 temperature_c=r["temperature_c"],
                 salinity_psu=r["salinity_psu"]
             ))
@@ -881,5 +888,157 @@ class QueryService:
             total_latency_ms=total_latency_ms
         )
         return resp, db_latency_ms, total_latency_ms
+
+    def get_region_summaries(self) -> Tuple[RegionSummaryResponse, float, float]:
+        """
+        Retrieve database-driven region summaries for all 12 canonical regions.
+        """
+        now = time.time()
+        if self._region_summaries_cache is not None and (now - self._region_summaries_timestamp < 120.0):
+            return self._region_summaries_cache
+
+        start_total = time.perf_counter()
+
+        canonical_regions = [
+            ("global_ocean", "Global Ocean"),
+            ("indian_ocean", "Indian Ocean"),
+            ("bay_of_bengal", "Bay of Bengal"),
+            ("arabian_sea", "Arabian Sea"),
+            ("south_china_sea", "South China Sea"),
+            ("western_pacific", "Western Pacific"),
+            ("eastern_pacific", "Eastern Pacific"),
+            ("western_atlantic", "Western Atlantic"),
+            ("eastern_atlantic", "Eastern Atlantic"),
+            ("southern_ocean", "Southern Ocean"),
+            ("arctic_ocean", "Arctic Ocean"),
+            ("mediterranean_sea", "Mediterranean Sea"),
+        ]
+
+        db_start = time.perf_counter()
+        region_items = []
+        regions_with_data_cnt = 0
+        total_unique_floats = 0
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Check if summary table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='argo_float_summary'")
+            summary_table_exists = cursor.fetchone() is not None
+
+            if summary_table_exists:
+                cursor.execute("SELECT float_id, region, profile_count, observation_count, last_observation FROM argo_float_summary")
+                summary_rows = cursor.fetchall()
+                total_unique_floats = len(summary_rows)
+
+                for reg_id, reg_name in canonical_regions:
+                    if reg_id == "global_ocean":
+                        f_cnt = len(summary_rows)
+                        p_cnt = sum(r["profile_count"] for r in summary_rows)
+                        obs_cnt = sum(r["observation_count"] for r in summary_rows)
+                        max_times = [r["last_observation"] for r in summary_rows if r["last_observation"]]
+                        max_time = max(max_times) if max_times else None
+                    else:
+                        matching = [r for r in summary_rows if reg_name.lower() in r["region"].lower()]
+                        f_cnt = len(matching)
+                        p_cnt = sum(r["profile_count"] for r in matching)
+                        obs_cnt = sum(r["observation_count"] for r in matching)
+                        max_times = [r["last_observation"] for r in matching if r["last_observation"]]
+                        max_time = max(max_times) if max_times else None
+
+                    latest_date = max_time.split("T")[0] if max_time else None
+                    has_data = f_cnt > 0
+                    if has_data:
+                        regions_with_data_cnt += 1
+
+                    region_items.append(RegionSummaryItem(
+                        region_id=reg_id,
+                        name=reg_name,
+                        float_count=f_cnt,
+                        profile_count=p_cnt,
+                        observation_count=obs_cnt,
+                        latest_profile_date=latest_date,
+                        has_data=has_data,
+                        source="Real ARGO GDAC"
+                    ))
+            else:
+                # Overall total distinct floats in dataset
+                cursor.execute("SELECT COUNT(DISTINCT float_id) as total_f FROM argo_observations")
+                tot_row = cursor.fetchone()
+                total_unique_floats = tot_row["total_f"] if tot_row and tot_row["total_f"] else 0
+
+                for reg_id, reg_name in canonical_regions:
+                    if reg_id == "global_ocean":
+                        cursor.execute("""
+                            SELECT 
+                                COUNT(DISTINCT float_id) as f_cnt,
+                                COUNT(DISTINCT float_id || '_' || cycle_number) as p_cnt,
+                                COUNT(*) as obs_cnt,
+                                MAX(profile_time) as max_time
+                            FROM argo_observations
+                        """)
+                    else:
+                        cursor.execute("""
+                            SELECT 
+                                COUNT(DISTINCT float_id) as f_cnt,
+                                COUNT(DISTINCT float_id || '_' || cycle_number) as p_cnt,
+                                COUNT(*) as obs_cnt,
+                                MAX(profile_time) as max_time
+                            FROM argo_observations
+                            WHERE region = ?
+                        """, (reg_name,))
+
+                    row = cursor.fetchone()
+                    f_cnt = row["f_cnt"] if row and row["f_cnt"] else 0
+                    p_cnt = row["p_cnt"] if row and row["p_cnt"] else 0
+                    obs_cnt = row["obs_cnt"] if row and row["obs_cnt"] else 0
+                    max_time = row["max_time"] if row and row["max_time"] else None
+
+                    latest_date = max_time.split("T")[0] if max_time else None
+
+                    has_data = f_cnt > 0
+                    if has_data:
+                        regions_with_data_cnt += 1
+
+                    region_items.append(RegionSummaryItem(
+                        region_id=reg_id,
+                        name=reg_name,
+                        float_count=f_cnt,
+                        profile_count=p_cnt,
+                        observation_count=obs_cnt,
+                        latest_profile_date=latest_date,
+                        has_data=has_data,
+                        source="Real ARGO GDAC"
+                    ))
+
+        db_end = time.perf_counter()
+        db_latency_ms = round((db_end - db_start) * 1000, 3)
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        provenance = ProvenanceInfo(
+            data_source="Real ARGO GDAC Core Profiles",
+            source_type="Real ARGO NetCDF (*.nc / *_prof.nc) via SQLite",
+            float_ids=[],
+            cycle_numbers=[],
+            variables=["temperature", "salinity"],
+            region="Global Ocean",
+            date_range={"start": None, "end": None},
+            processing_qc_notes="Region summaries calculated dynamically from real ARGO SQLite database."
+        )
+
+        resp = RegionSummaryResponse(
+            total_regions=len(canonical_regions),
+            regions_with_data=regions_with_data_cnt,
+            total_floats=total_unique_floats,
+            regions=region_items,
+            provenance=provenance,
+            sqlite_db_latency_ms=db_latency_ms,
+            total_latency_ms=total_latency_ms
+        )
+        self._region_summaries_cache = (resp, db_latency_ms, total_latency_ms)
+        self._region_summaries_timestamp = now
+        return resp, db_latency_ms, total_latency_ms
+
 
 

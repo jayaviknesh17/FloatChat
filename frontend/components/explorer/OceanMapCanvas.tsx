@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Plus, Minus, Crosshair, Layers, Compass, Loader2 } from "lucide-react";
+import { Plus, Minus, Crosshair, Layers, Compass, Loader2, Globe, Maximize2 } from "lucide-react";
 import { FloatSummaryItem, ArgoFloat, OceanRegion, OceanVariable, TrajectoryPoint } from "@/lib/types";
+import { WORLD_LANDMASSES, GLOBAL_OCEAN_LABELS } from "@/lib/worldLandmasses";
 
 interface OceanMapCanvasProps {
   floats: (FloatSummaryItem | ArgoFloat)[];
@@ -33,71 +34,133 @@ export default function OceanMapCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Map viewport transform (Pan & Zoom)
-  const [zoom, setZoom] = useState<number>(1);
-  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  // Default view centered on Indian Ocean (Lon ~78°E, Lat ~8°N)
+  const [zoom, setZoom] = useState<number>(1.15);
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 40, y: 15 });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [hoveredFloat, setHoveredFloat] = useState<any | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [mapLayer, setMapLayer] = useState<"satellite" | "temperature" | "salinity">("satellite");
 
-  // Load background satellite bathymetry image
-  const bgImageRef = useRef<HTMLImageElement | null>(null);
-  const [imageLoaded, setImageLoaded] = useState<boolean>(false);
-
-  useEffect(() => {
-    const img = new Image();
-    img.src = "/assets/indian_ocean_map.jpg";
-    img.onload = () => {
-      bgImageRef.current = img;
-      setImageLoaded(true);
-    };
+  // Convert Lon [-180..180], Lat [-90..90] to normalized 0..1 map coordinates
+  const geoToNorm = useCallback((lon: number, lat: number) => {
+    // Equirectangular Projection over full Earth (-180° to +180°, -90° to +90°)
+    const normX = (lon + 180) / 360;
+    const normY = 1 - (lat + 90) / 180; // Invert Y for canvas
+    return { x: normX, y: normY };
   }, []);
+
+  // Convert Center Lon/Lat to Canvas Pan offset
+  const centerToPan = useCallback((targetLon: number, targetLat: number, targetZoom: number, containerW: number, containerH: number) => {
+    const { x: nX, y: nY } = geoToNorm(targetLon, targetLat);
+    const targetWorldX = nX * containerW;
+    const targetWorldY = nY * containerH;
+
+    // We want targetWorldX * targetZoom + panX = containerW / 2
+    // panX = containerW / 2 - (targetWorldX - containerW / 2) * targetZoom - containerW / 2 ...
+    // Simplified: pan.x = (containerW / 2 - targetWorldX) * targetZoom
+    const panX = (containerW / 2 - targetWorldX) * targetZoom;
+    const panY = (containerH / 2 - targetWorldY) * targetZoom;
+
+    return { x: panX, y: panY };
+  }, [geoToNorm]);
 
   // Auto-focus viewport based on selected region
   useEffect(() => {
-    if (selectedRegion === "Bay of Bengal") {
-      setZoom(1.65);
-      setPan({ x: -110, y: 70 });
-    } else if (selectedRegion === "Arabian Sea") {
-      setZoom(1.65);
-      setPan({ x: 130, y: 70 });
-    } else if (selectedRegion === "Indian Ocean" || selectedRegion === "All") {
-      setZoom(1);
-      setPan({ x: 0, y: 0 });
-    }
-  }, [selectedRegion]);
+    const container = containerRef.current;
+    const w = container ? container.clientWidth : 800;
+    const h = container ? container.clientHeight : 440;
 
-  // Center / Reset View
+    if (selectedRegion === "Bay of Bengal") {
+      setZoom(2.5);
+      setPan(centerToPan(88.5, 14.5, 2.5, w, h));
+    } else if (selectedRegion === "Arabian Sea") {
+      setZoom(2.5);
+      setPan(centerToPan(65.0, 15.0, 2.5, w, h));
+    } else if (selectedRegion === "Indian Ocean") {
+      setZoom(1.5);
+      setPan(centerToPan(78.0, 0.0, 1.5, w, h));
+    } else if (selectedRegion === "All") {
+      setZoom(1.15);
+      setPan(centerToPan(75.0, 10.0, 1.15, w, h));
+    }
+  }, [selectedRegion, centerToPan]);
+
+  // Reset View to Indian Ocean Focus
   const handleResetView = useCallback(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
+    const container = containerRef.current;
+    const w = container ? container.clientWidth : 800;
+    const h = container ? container.clientHeight : 440;
+    setZoom(1.15);
+    setPan(centerToPan(75.0, 10.0, 1.15, w, h));
+  }, [centerToPan]);
+
+  // Global View (Full World Earth View)
+  const handleGlobalView = useCallback(() => {
+    const container = containerRef.current;
+    const w = container ? container.clientWidth : 800;
+    const h = container ? container.clientHeight : 440;
+    setZoom(0.85);
+    setPan(centerToPan(20.0, 0.0, 0.85, w, h));
+  }, [centerToPan]);
+
+  // Fit All Floats Bounding Box
+  const handleFitAllFloats = useCallback(() => {
+    if (!floats || floats.length === 0) {
+      handleResetView();
+      return;
+    }
+
+    let minLon = 180, maxLon = -180, minLat = 90, maxLat = -90;
+    let count = 0;
+
+    floats.forEach((f) => {
+      const lat = "latest_latitude" in f ? f.latest_latitude : f.lat;
+      const lon = "latest_longitude" in f ? f.latest_longitude : f.lon;
+      if (lat !== undefined && lon !== undefined && !isNaN(lat) && !isNaN(lon)) {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        count++;
+      }
+    });
+
+    if (count === 0) {
+      handleResetView();
+      return;
+    }
+
+    const container = containerRef.current;
+    const w = container ? container.clientWidth : 800;
+    const h = container ? container.clientHeight : 440;
+
+    const midLon = (minLon + maxLon) / 2;
+    const midLat = (minLat + maxLat) / 2;
+
+    const dLon = Math.max(12, maxLon - minLon + 6);
+    const dLat = Math.max(10, maxLat - minLat + 6);
+
+    const fitZoomX = 360 / dLon;
+    const fitZoomY = 180 / dLat;
+    const calcZoom = Math.min(Math.max(Math.min(fitZoomX, fitZoomY) * 0.75, 0.9), 3.5);
+
+    setZoom(calcZoom);
+    setPan(centerToPan(midLon, midLat, calcZoom, w, h));
+  }, [floats, handleResetView, centerToPan]);
 
   const handleZoomIn = () => {
-    setZoom((prev) => Math.min(prev * 1.3, 4.5));
+    setZoom((prev) => Math.min(prev * 1.3, 5.0));
   };
 
   const handleZoomOut = () => {
-    setZoom((prev) => Math.max(prev / 1.3, 0.8));
+    setZoom((prev) => Math.max(prev / 1.3, 0.65));
   };
 
   const toggleLayer = () => {
     setMapLayer((prev) => (prev === "satellite" ? "temperature" : prev === "temperature" ? "salinity" : "satellite"));
   };
-
-  // Convert Lon/Lat to normalized 0..1 map coordinates
-  // Map coverage: Lon 15°E to 145°E, Lat -42°S to 32°N
-  const geoToNorm = useCallback((lon: number, lat: number) => {
-    const minLon = 15;
-    const maxLon = 145;
-    const minLat = -42;
-    const maxLat = 32;
-
-    const normX = (lon - minLon) / (maxLon - minLon);
-    const normY = 1 - (lat - minLat) / (maxLat - minLat); // Invert Y for canvas
-    return { x: normX, y: normY };
-  }, []);
 
   // Canvas Render Loop
   useEffect(() => {
@@ -117,30 +180,84 @@ export default function OceanMapCanvas({
       const width = (canvas.width = container.clientWidth);
       const height = (canvas.height = container.clientHeight);
 
-      // Background fill
-      ctx.fillStyle = "#030d1d";
+      // Deep Ocean Atmosphere Background Fill
+      ctx.fillStyle = "#020917";
       ctx.fillRect(0, 0, width, height);
 
       ctx.save();
 
-      // Apply Pan & Zoom Transform
+      // Apply Pan & Zoom Transform around viewport center
       ctx.translate(width / 2 + pan.x, height / 2 + pan.y);
       ctx.scale(zoom, zoom);
       ctx.translate(-width / 2, -height / 2);
 
-      // 1. Draw Satellite Bathymetry Base Map
-      if (bgImageRef.current && imageLoaded) {
-        ctx.drawImage(bgImageRef.current, 0, 0, width, height);
-      } else {
-        const oceanGrad = ctx.createRadialGradient(width / 2, height / 2, 50, width / 2, height / 2, width);
-        oceanGrad.addColorStop(0, "#08244c");
-        oceanGrad.addColorStop(0.6, "#041530");
-        oceanGrad.addColorStop(1, "#020a17");
-        ctx.fillStyle = oceanGrad;
-        ctx.fillRect(0, 0, width, height);
-      }
+      // 1. Draw Ocean Graticule Lines (Equator, Tropics, Meridians)
+      ctx.strokeStyle = "rgba(56, 189, 248, 0.07)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
 
-      // 2. Layer Overlays (Temperature Heatmap, Salinity Tint, or Manual Layer)
+      // Latitude lines (-60°, -30°, 0° Equator, 30°, 60°)
+      [-60, -30, 0, 30, 60].forEach((latVal) => {
+        const { y: ny } = geoToNorm(0, latVal);
+        const py = ny * height;
+        ctx.beginPath();
+        ctx.moveTo(0, py);
+        ctx.lineTo(width, py);
+        ctx.stroke();
+
+        // Label equator / tropics
+        if (latVal === 0) {
+          ctx.fillStyle = "rgba(56, 189, 248, 0.25)";
+          ctx.font = "9px monospace";
+          ctx.fillText("EQUATOR 0°", 15, py - 4);
+        }
+      });
+
+      // Longitude lines (-120°, -60°, 0° Prime Meridian, 60°, 120°)
+      [-120, -60, 0, 60, 120].forEach((lonVal) => {
+        const { x: nx } = geoToNorm(lonVal, 0);
+        const px = nx * width;
+        ctx.beginPath();
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, height);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+
+      // 2. Draw Vector World Continents & Islands
+      WORLD_LANDMASSES.forEach((land) => {
+        if (land.coordinates.length < 3) return;
+
+        ctx.beginPath();
+        land.coordinates.forEach(([lon, lat], idx) => {
+          const { x: nx, y: ny } = geoToNorm(lon, lat);
+          const px = nx * width;
+          const py = ny * height;
+          if (idx === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+
+        // Landmass fill: Dark tech styling
+        if (land.name === "India Subcontinent") {
+          ctx.fillStyle = "#092447";
+          ctx.fill();
+          ctx.strokeStyle = "#0284c7";
+          ctx.lineWidth = 1.8;
+          ctx.shadowColor = "rgba(2, 132, 199, 0.5)";
+          ctx.shadowBlur = 8;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.fillStyle = "#071b36";
+          ctx.fill();
+          ctx.strokeStyle = "rgba(30, 64, 175, 0.7)";
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+      });
+
+      // 3. Layer Overlays (Temperature Heatmap, Salinity Tint, or Manual Layer)
       const effectiveLayer = (selectedVariable === "Temperature" || selectedVariable === "Marine Heatwaves")
         ? "temperature"
         : selectedVariable === "Salinity"
@@ -148,44 +265,40 @@ export default function OceanMapCanvas({
         : mapLayer;
 
       if (effectiveLayer === "temperature") {
-        const tempGrad = ctx.createRadialGradient(width * 0.52, height * 0.35, 20, width * 0.52, height * 0.35, width * 0.45);
+        const { x: bobX, y: bobY } = geoToNorm(89, 14);
+        const tempGrad = ctx.createRadialGradient(bobX * width, bobY * height, 10, bobX * width, bobY * height, width * 0.35);
         tempGrad.addColorStop(0, "rgba(244, 63, 94, 0.28)");
-        tempGrad.addColorStop(0.5, "rgba(251, 146, 60, 0.18)");
-        tempGrad.addColorStop(1, "rgba(56, 189, 248, 0.05)");
+        tempGrad.addColorStop(0.6, "rgba(251, 146, 60, 0.16)");
+        tempGrad.addColorStop(1, "rgba(56, 189, 248, 0.02)");
         ctx.fillStyle = tempGrad;
         ctx.fillRect(0, 0, width, height);
       } else if (effectiveLayer === "salinity") {
-        const salGrad = ctx.createRadialGradient(width * 0.38, height * 0.32, 20, width * 0.38, height * 0.32, width * 0.4);
-        salGrad.addColorStop(0, "rgba(34, 211, 238, 0.32)");
-        salGrad.addColorStop(0.6, "rgba(14, 165, 233, 0.15)");
-        salGrad.addColorStop(1, "rgba(2, 6, 23, 0.05)");
+        const { x: asX, y: asY } = geoToNorm(64, 14);
+        const salGrad = ctx.createRadialGradient(asX * width, asY * height, 10, asX * width, asY * height, width * 0.35);
+        salGrad.addColorStop(0, "rgba(34, 211, 238, 0.30)");
+        salGrad.addColorStop(0.6, "rgba(14, 165, 233, 0.14)");
+        salGrad.addColorStop(1, "rgba(2, 6, 23, 0.02)");
         ctx.fillStyle = salGrad;
         ctx.fillRect(0, 0, width, height);
       }
 
-      // 3. Geographic Region Labels
-      const labels = [
-        { text: "Bay of Bengal", x: 0.61, y: 0.33, color: "rgba(186, 230, 253, 0.95)", size: 14, style: "normal" },
-        { text: "Arabian Sea", x: 0.36, y: 0.32, color: "rgba(186, 230, 253, 0.95)", size: 14, style: "normal" },
-        { text: "Indian Ocean", x: 0.49, y: 0.62, color: "rgba(147, 197, 253, 0.85)", size: 16, style: "italic" },
-        { text: "Pacific Ocean", x: 0.84, y: 0.36, color: "rgba(148, 163, 184, 0.65)", size: 13, style: "italic" },
-        { text: "Atlantic Ocean", x: 0.16, y: 0.52, color: "rgba(148, 163, 184, 0.65)", size: 13, style: "italic" },
-      ];
+      // 4. Geographic Region Labels
+      GLOBAL_OCEAN_LABELS.forEach((lbl) => {
+        const { x: nx, y: ny } = geoToNorm(lbl.lon, lbl.lat);
+        const lx = nx * width;
+        const ly = ny * height;
 
-      labels.forEach((lbl) => {
-        const lx = width * lbl.x;
-        const ly = height * lbl.y;
         ctx.font = `${lbl.style} 600 ${lbl.size}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.fillStyle = lbl.color;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+        ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
         ctx.shadowBlur = 6;
-        ctx.fillText(lbl.text, lx, ly);
+        ctx.fillText(lbl.name, lx, ly);
         ctx.shadowBlur = 0;
       });
 
-      // 4. Render Real ARGO 3D/4D Trajectory Path overlay
+      // 5. Render Real ARGO 3D/4D Trajectory Path overlay
       if (trajectories && trajectories.length > 1) {
         ctx.beginPath();
         trajectories.forEach((tp, i) => {
@@ -195,16 +308,21 @@ export default function OceanMapCanvas({
           if (i === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         });
-        ctx.strokeStyle = "rgba(34, 211, 238, 0.5)";
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(34, 211, 238, 0.65)";
+        ctx.lineWidth = 2.2;
+        ctx.shadowColor = "rgba(34, 211, 238, 0.6)";
+        ctx.shadowBlur = 8;
         ctx.stroke();
+        ctx.shadowBlur = 0;
       }
 
-      // 5. Render Real ARGO Floats
+      // 6. Render Real ARGO Floats (Deduplicated by Float ID)
       const filteredFloats = floats.filter((f) => {
-        if (selectedRegion !== "All" && f.region !== selectedRegion) return false;
+        if (selectedRegion !== "All" && selectedRegion !== "Indian Ocean" && f.region !== selectedRegion) return false;
         return true;
       });
+
+      const drawnFloatIds = new Set<string>();
 
       filteredFloats.forEach((f) => {
         const lat = "latest_latitude" in f ? f.latest_latitude : f.lat;
@@ -212,6 +330,8 @@ export default function OceanMapCanvas({
         const fid = "float_id" in f ? f.float_id : f.id;
 
         if (lat === undefined || lon === undefined || isNaN(lat) || isNaN(lon)) return;
+        if (drawnFloatIds.has(fid)) return;
+        drawnFloatIds.add(fid);
 
         const { x: normX, y: normY } = geoToNorm(lon, lat);
         const fx = normX * width;
@@ -225,30 +345,34 @@ export default function OceanMapCanvas({
 
         // Selected Float Pulsing Ring
         if (isSelected) {
-          const pulseRadius = 11 + Math.sin(tick * 3) * 3;
+          const pulseRadius = 12 + Math.sin(tick * 3.5) * 3.5;
           ctx.beginPath();
           ctx.arc(fx, fy, pulseRadius, 0, Math.PI * 2);
           ctx.strokeStyle = "#22d3ee";
           ctx.lineWidth = 2;
           ctx.shadowColor = "rgba(34, 211, 238, 0.9)";
-          ctx.shadowBlur = 12;
+          ctx.shadowBlur = 14;
           ctx.stroke();
           ctx.shadowBlur = 0;
         }
 
         // Float Outer Glow Halo
-        const glowRadius = isHovered ? 8.5 : 6;
+        const glowRadius = isHovered ? 9 : 6.5;
         ctx.beginPath();
         ctx.arc(fx, fy, glowRadius, 0, Math.PI * 2);
-        ctx.fillStyle = isSelected ? "rgba(34, 211, 238, 0.7)" : isHovered ? "rgba(56, 189, 248, 0.8)" : "rgba(56, 189, 248, 0.5)";
+        ctx.fillStyle = isSelected
+          ? "rgba(34, 211, 238, 0.75)"
+          : isHovered
+          ? "rgba(56, 189, 248, 0.85)"
+          : "rgba(56, 189, 248, 0.55)";
         ctx.fill();
 
         // Float Center Dot
         ctx.beginPath();
-        ctx.arc(fx, fy, isHovered ? 4 : 2.8, 0, Math.PI * 2);
+        ctx.arc(fx, fy, isHovered ? 4.5 : 3, 0, Math.PI * 2);
         ctx.fillStyle = isSelected ? "#ffffff" : "#38bdf8";
         ctx.shadowColor = "#38bdf8";
-        ctx.shadowBlur = 6;
+        ctx.shadowBlur = 8;
         ctx.fill();
         ctx.shadowBlur = 0;
       });
@@ -263,9 +387,9 @@ export default function OceanMapCanvas({
     return () => {
       cancelAnimationFrame(animFrame);
     };
-  }, [floats, selectedFloat, hoveredFloat, selectedRegion, selectedVariable, pan, zoom, imageLoaded, geoToNorm, mapLayer, trajectories]);
+  }, [floats, selectedFloat, hoveredFloat, selectedRegion, selectedVariable, pan, zoom, geoToNorm, mapLayer, trajectories]);
 
-  // Handle Mouse / Drag / Wheel Events
+  // Mouse / Drag / Wheel Handlers
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
     setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
@@ -293,13 +417,13 @@ export default function OceanMapCanvas({
     const canvasX = (clientX - (width / 2 + pan.x)) / zoom + width / 2;
     const canvasY = (clientY - (height / 2 + pan.y)) / zoom + height / 2;
 
-    const hitRadius = 14;
+    const hitRadius = 15;
     let foundFloat: any = null;
 
     for (const f of floats) {
       const lat = "latest_latitude" in f ? f.latest_latitude : f.lat;
       const lon = "latest_longitude" in f ? f.latest_longitude : f.lon;
-      if (lat === undefined || lon === undefined) continue;
+      if (lat === undefined || lon === undefined || isNaN(lat) || isNaN(lon)) continue;
 
       const { x: normX, y: normY } = geoToNorm(lon, lat);
       const fx = normX * width;
@@ -319,7 +443,7 @@ export default function OceanMapCanvas({
     setIsDragging(false);
   };
 
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = () => {
     if (hoveredFloat) {
       onSelectFloat(hoveredFloat);
     }
@@ -328,13 +452,13 @@ export default function OceanMapCanvas({
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setZoom((prev) => Math.max(0.7, Math.min(4.5, prev * delta)));
+    setZoom((prev) => Math.max(0.65, Math.min(5.0, prev * delta)));
   };
 
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden select-none border border-cyan-500/25 bg-[#030d1d] shadow-2xl"
+      className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden select-none border border-cyan-500/25 bg-[#020917] shadow-2xl"
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -346,12 +470,12 @@ export default function OceanMapCanvas({
       onWheel={handleWheel}
       style={{ cursor: isDragging ? "grabbing" : hoveredFloat ? "pointer" : "grab" }}
     >
-      {/* 2D / 3D Canvas Map */}
+      {/* Global Interactive Vector Canvas Map */}
       <canvas ref={canvasRef} className="w-full h-full block" />
 
       {/* Loading Overlay */}
       {isLoading && (
-        <div className="absolute inset-0 bg-[#030d1d]/70 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-30 pointer-events-none">
+        <div className="absolute inset-0 bg-[#020917]/75 backdrop-blur-sm flex flex-col items-center justify-center gap-2 z-30 pointer-events-none">
           <Loader2 className="w-7 h-7 text-cyan-400 animate-spin" />
           <span className="text-xs font-mono-sci text-cyan-300">Loading real ARGO float array...</span>
         </div>
@@ -406,7 +530,7 @@ export default function OceanMapCanvas({
             handleResetView();
           }}
           title="Center on Indian Ocean"
-          aria-label="Reset map center"
+          aria-label="Center on Indian Ocean"
           className="w-8 h-8 rounded-lg bg-[#061833]/85 hover:bg-[#0a254d] border border-cyan-500/30 text-cyan-200 hover:text-white flex items-center justify-center backdrop-blur-md shadow-lg transition-all"
         >
           <Crosshair className="w-4 h-4" />
@@ -414,9 +538,31 @@ export default function OceanMapCanvas({
         <button
           onClick={(e) => {
             e.stopPropagation();
+            handleGlobalView();
+          }}
+          title="Full Global Earth View"
+          aria-label="Full Global View"
+          className="w-8 h-8 rounded-lg bg-[#061833]/85 hover:bg-[#0a254d] border border-cyan-500/30 text-cyan-200 hover:text-white flex items-center justify-center backdrop-blur-md shadow-lg transition-all"
+        >
+          <Globe className="w-4 h-4" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleFitAllFloats();
+          }}
+          title="Fit All ARGO Floats in View"
+          aria-label="Fit All Floats"
+          className="w-8 h-8 rounded-lg bg-[#061833]/85 hover:bg-[#0a254d] border border-cyan-500/30 text-cyan-200 hover:text-white flex items-center justify-center backdrop-blur-md shadow-lg transition-all"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
             toggleLayer();
           }}
-          title={`Layer: ${mapLayer === "satellite" ? "Bathymetry" : mapLayer === "temperature" ? "SST Heatmap" : "Salinity Gradient"}`}
+          title={`Layer: ${mapLayer === "satellite" ? "Bathymetry Base" : mapLayer === "temperature" ? "SST Heatmap" : "Salinity Gradient"}`}
           aria-label="Toggle layer"
           className={`w-8 h-8 rounded-lg border flex items-center justify-center backdrop-blur-md shadow-lg transition-all ${
             mapLayer !== "satellite"
@@ -429,13 +575,13 @@ export default function OceanMapCanvas({
       </div>
 
       {/* Bottom Map Legend & Scale Bar Overlay */}
-      <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between pointer-events-none z-20 text-[11px] font-mono-sci">
+      <div className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center justify-between gap-2 pointer-events-none z-20 text-[11px] font-mono-sci">
         {/* Left: Legend Pills */}
         <div className="flex items-center gap-3 px-3 py-1.5 rounded-full bg-[#051833]/85 backdrop-blur-md border border-cyan-500/25 shadow-lg">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
             <span className="text-slate-200">
-              ARGO Float {isRealDataConnected ? "(Real ARGO Array)" : "(Offline / No Data)"}
+              ARGO Float {isRealDataConnected ? "(Real GDAC Array)" : "(Offline)"}
             </span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -460,9 +606,8 @@ export default function OceanMapCanvas({
               </div>
               <div className="flex justify-between w-20 text-[9px] text-slate-400 mt-0.5">
                 <span>0</span>
-                <span>500</span>
                 <span>1,000</span>
-                <span>2,000 km</span>
+                <span>2,500 km</span>
               </div>
             </div>
           </div>
