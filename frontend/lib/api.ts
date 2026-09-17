@@ -685,6 +685,8 @@ export async function getOceanInsightsSummary(params?: {
     }
     throw err;
   }
+}
+
 /**
  * 7. GET /api/visualizations/regions
  */
