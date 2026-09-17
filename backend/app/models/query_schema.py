@@ -10,12 +10,19 @@ from backend.app.models.provenance import ProvenanceInfo
 
 
 # Supported constants
-ALLOWED_REGIONS = {"bay_of_bengal", "arabian_sea", "bay of bengal", "arabian sea"}
+ALLOWED_REGIONS = {
+    "bay_of_bengal", "arabian_sea", "indian_ocean", "global_ocean",
+    "bay of bengal", "arabian sea", "indian ocean", "global ocean"
+}
 REGION_MAPPING = {
     "bay_of_bengal": "Bay of Bengal",
     "bay of bengal": "Bay of Bengal",
     "arabian_sea": "Arabian Sea",
     "arabian sea": "Arabian Sea",
+    "indian_ocean": "Indian Ocean",
+    "indian ocean": "Indian Ocean",
+    "global_ocean": "Global Ocean",
+    "global ocean": "Global Ocean",
 }
 
 ALLOWED_VARIABLES = {"temperature", "salinity", "both"}

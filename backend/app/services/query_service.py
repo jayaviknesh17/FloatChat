@@ -510,9 +510,10 @@ class QueryService:
         count: int,
         float_count: int,
         anomaly_summary: Optional[Dict[str, Any]],
+        results: Optional[List[Dict[str, Any]]] = None,
         lang: str = "en"
     ) -> str:
-        """Generate humanized natural language response summary in user's language without altering scientific values."""
+        """Generate humanized natural language response summary in user's language containing real statistical values."""
         from backend.app.services.nl_query_service import NLQueryService
         nl_service = NLQueryService()
 
@@ -520,12 +521,30 @@ class QueryService:
         if count == 0:
             return self._generate_informative_empty_state_response(req, query_text, lang)
 
-        # 2. Try Gemini scientific summary generation if enabled
+        # Extract numerical statistics from retrieved real SQLite observation records
+        records = results or []
+        valid_temps = [r["temperature_c"] for r in records if r.get("temperature_c") is not None]
+        valid_sals = [r["salinity_psu"] for r in records if r.get("salinity_psu") is not None]
+
+        has_temp = len(valid_temps) > 0
+        min_temp = round(min(valid_temps), 2) if has_temp else None
+        max_temp = round(max(valid_temps), 2) if has_temp else None
+        avg_temp = round(sum(valid_temps) / len(valid_temps), 2) if has_temp else None
+
+        has_sal = len(valid_sals) > 0
+        min_sal = round(min(valid_sals), 2) if has_sal else None
+        max_sal = round(max(valid_sals), 2) if has_sal else None
+        avg_sal = round(sum(valid_sals) / len(valid_sals), 2) if has_sal else None
+
+        th_res = detect_thermocline(records[:100]) if records else {}
+        th_depth = th_res.get("estimated_thermocline_depth_m")
+
         has_anomalies = (
             req.analysis == "anomaly" or
             (anomaly_summary is not None and isinstance(anomaly_summary, dict) and anomaly_summary.get("anomaly_count", 0) > 0)
         )
 
+        # 2. Try Gemini scientific summary generation if enabled
         facts = {
             "query": query_text,
             "count": count,
@@ -535,7 +554,18 @@ class QueryService:
             "float_id": req.float_id,
             "cycle_number": req.cycle_number,
             "has_anomalies": has_anomalies,
-            "anomaly_details": anomaly_summary if has_anomalies else None
+            "anomaly_details": anomaly_summary if has_anomalies else None,
+            "temperature_stats": {
+                "min_c": min_temp,
+                "max_c": max_temp,
+                "avg_c": avg_temp
+            } if has_temp else None,
+            "salinity_stats": {
+                "min_psu": min_sal,
+                "max_psu": max_sal,
+                "avg_psu": avg_sal
+            } if has_sal else None,
+            "thermocline_depth_m": round(th_depth, 1) if th_depth is not None else None,
         }
 
         try:
@@ -545,39 +575,85 @@ class QueryService:
         except Exception as e:
             logger.warning(f"Gemini summary generation failed: {e}. Using natural offline template.")
 
-        # 3. Upgraded Natural Offline Summary Fallback
-        if has_anomalies:
-            if lang == "ta":
-                return "Indha ARGO observations-la temperature anomaly detect panni irukken 🌊. Strongest anomaly-oda depth, temperature, baseline, and z-score keela kaati irukken."
-            elif lang == "hi":
-                return "In ARGO observations mein temperature anomaly milli hai 🌊. Sabse strong anomaly ki depth, temperature, baseline aur z-score neeche diye gaye hain."
-            else:
-                return "I found a temperature anomaly in the selected ARGO observations 🌊. The strongest detected anomaly is shown below with its depth, temperature, baseline and z-score."
-
+        # 3. Upgraded Natural Offline Summary Fallback (Rich numerical values)
         region_str = req.region or "the ocean"
         count_fmt = f"{count:,}"
+        q_lower = query_text.lower()
+        is_temp_query = "temp" in q_lower or req.variable == "temperature"
+        is_sal_query = "salin" in q_lower or "psal" in q_lower or req.variable == "salinity"
+        is_th_query = "thermocline" in q_lower or req.analysis == "thermocline"
 
-        if req.region:
+        # A. Anomaly Response
+        if has_anomalies:
+            anom_cnt = anomaly_summary.get("anomaly_count", 0) if isinstance(anomaly_summary, dict) else 0
+            max_z = anomaly_summary.get("max_abs_z_score", 0.0) if isinstance(anomaly_summary, dict) else 0.0
+            var_label = "temperature" if req.variable == "temperature" else ("salinity" if req.variable == "salinity" else "temperature/salinity")
             if lang == "ta":
-                return f"Sure da 🌊 {region_str}-oda real ARGO data eduthuten.\n\n{count_fmt} observations கிடைச்சிருக்கு from {float_count} float(s). Keela irukkura profile-la depth-ku values eppadi change aagudhu nu paakalaam.\n\nVenumna next, anomaly irukka-nu check pannalaam."
+                return f"Indha {region_str} ARGO observations-la {anom_cnt} {var_label} anomaly level(s) detect panni irukken 🌊. Max deviation z-score {max_z:.2f}σ. Strongest anomaly details keela kaati irukken."
             elif lang == "hi":
-                return f"Bilkul 🌊 {region_str} ka real ARGO data mil gaya.\n\nIs result mein {count_fmt} observations from {float_count} float(s) hain. Neeche profile mein depth ke saath values kaise change hoti hain woh dekh sakte ho.\n\nAgar chaho toh main anomalies bhi check kar sakta hoon."
+                return f"In {region_str} ARGO observations mein {anom_cnt} {var_label} anomaly level(s) mile hain 🌊. Max deviation z-score {max_z:.2f}σ hai. Strongest anomaly ki details neeche dekhein."
             else:
-                return f"Sure 🌊 I pulled the real ARGO observations for the {region_str}.\n\nI found {count_fmt} observations across {float_count} float(s) in the selected data. The profile is ready below so you can see how it changes with depth.\n\nWant me to check this data for temperature anomalies next?"
-        elif req.float_id:
+                return f"I found {anom_cnt} statistical {var_label} anomaly level(s) across {float_count} float(s) in {region_str} 🌊. The maximum detected deviation reached {max_z:.2f}σ. The strongest anomaly is highlighted in the details below."
+
+        # B. Specific Float Response
+        if req.float_id:
+            fid = req.float_id
+            if has_temp and has_sal:
+                stat_str = f"The observed temperature ranges from {min_temp}°C to {max_temp}°C (average {avg_temp}°C), and salinity ranges from {min_sal} PSU to {max_sal} PSU (average {avg_sal} PSU)."
+            elif has_temp:
+                stat_str = f"The observed temperature ranges from {min_temp}°C to {max_temp}°C, with an average of {avg_temp}°C."
+            elif has_sal:
+                stat_str = f"The observed salinity ranges from {min_sal} PSU to {max_sal} PSU, with an average of {avg_sal} PSU."
+            else:
+                stat_str = "Detailed vertical profile levels are available below."
+
             if lang == "ta":
-                return f"Sure da 🌊 Float {req.float_id}-oda real ARGO observations eduthuten.\n\n{count_fmt} observations கிடைச்சிருக்கு. Keela irukkura profile-la detailed levels paakalaam."
+                return f"Sure da 🌊 Float {fid}-oda {count_fmt} real ARGO observations eduthuten in {region_str}. {stat_str} Keela irukkura profile-la detailed levels paakalaam."
             elif lang == "hi":
-                return f"Bilkul 🌊 Float {req.float_id} ke real ARGO observations mil gaye.\n\n{count_fmt} observations hain. Neeche profile mein detailed levels dekh sakte ho."
+                return f"Bilkul 🌊 Float {fid} ke {count_fmt} real ARGO observations mil gaye in {region_str}. {stat_str} Neeche profile mein detailed levels dekh sakte ho."
             else:
-                return f"Sure 🌊 I pulled {count_fmt} real ARGO observations for float {req.float_id}. You can inspect the detailed profile levels below."
-        else:
+                return f"Sure 🌊 I pulled {count_fmt} real ARGO observations for Float {fid} in {region_str}. {stat_str} You can inspect the detailed profile levels below."
+
+        # C. Thermocline Query Response
+        if is_th_query and th_depth is not None:
+            depth_val = int(th_depth)
+            temp_range_str = f" (temperature drops from {max_temp}°C to {min_temp}°C)" if has_temp else ""
             if lang == "ta":
-                return f"Sure da 🌊 {float_count} floats-oda {count_fmt} real ARGO observations eduthuten. Keela profile data-va explore pannalaam."
+                return f"Sure da 🌊 {region_str}-la {count_fmt} real ARGO observations analyze panni thermocline depth calculate pannitten. Estimated thermocline depth ~{depth_val} meters-la irukku{temp_range_str}. Keela profile-la paakalaam."
             elif lang == "hi":
-                return f"Bilkul 🌊 {float_count} floats se {count_fmt} real ARGO observations mil gaye. Neeche profile data explore kar sakte ho."
+                return f"Bilkul 🌊 {region_str} mein {count_fmt} real ARGO observations analyze karke thermocline depth calculate ki hai. Estimated thermocline depth ~{depth_val} meters par hai{temp_range_str}. Neeche profile dekhein."
             else:
-                return f"Sure 🌊 I found {count_fmt} real ARGO observations across {float_count} floats. Explore the profile data below."
+                return f"Analyzed {count_fmt} real ARGO observations across {float_count} float(s) in {region_str} 🌊. The calculated thermocline depth is estimated at ~{depth_val} meters{temp_range_str}. The profile chart below shows vertical gradients."
+
+        # D. Temperature Query Response
+        if is_temp_query and has_temp:
+            if lang == "ta":
+                return f"Sure da 🌊 {region_str}-la {float_count} float(s) nadvula {count_fmt} real ARGO temperature observations கிடைச்சிருக்கு. Selected profiles-la temperature {min_temp}°C-la irundhu {max_temp}°C varaikum irukku, average {avg_temp}°C. Keela irukkura profile chart-la depth-ku temperature eppadi change aagudhu nu paakalaam."
+            elif lang == "hi":
+                return f"Bilkul 🌊 {region_str} mein {float_count} float(s) se {count_fmt} real ARGO temperature observations mil gaye hain. Selected profiles mein temperature {min_temp}°C se {max_temp}°C tak hai, average {avg_temp}°C. Neeche profile chart mein depth ke saath temperature dekh sakte hain."
+            else:
+                return f"🌊 I found {count_fmt} real ARGO temperature observations across {float_count} float(s) in {region_str}. The observed temperature in the selected profiles ranges from {min_temp}°C to {max_temp}°C, with an average of {avg_temp}°C. The profile chart below shows how temperature changes with depth."
+
+        # E. Salinity Query Response
+        if is_sal_query and has_sal:
+            if lang == "ta":
+                return f"Sure da 🌊 {region_str}-la {float_count} float(s) nadvula {count_fmt} real ARGO salinity observations கிடைச்சிருக்கு. Salinity range {min_sal} PSU-la irundhu {max_sal} PSU varaikum irukku, average {avg_sal} PSU. Keela detailed salinity profile chart-ai paakalaam."
+            elif lang == "hi":
+                return f"Bilkul 🌊 {region_str} mein {float_count} float(s) se {count_fmt} real ARGO salinity observations mil gaye hain. Salinity range {min_sal} PSU se {max_sal} PSU tak hai, average {avg_sal} PSU. Neeche detailed salinity profile chart dekh sakte hain."
+            else:
+                return f"🌊 I found {count_fmt} real ARGO salinity observations across {float_count} float(s) in {region_str}. The observed salinity ranges from {min_sal} PSU to {max_sal} PSU, with an average of {avg_sal} PSU. Check out the detailed salinity profile chart below."
+
+        # F. Combined / Default Scientific Response (Both Temp & Salinity)
+        if has_temp and has_sal:
+            if lang == "ta":
+                return f"Sure da 🌊 {region_str}-la {float_count} float(s) nadvula {count_fmt} real ARGO observations கிடைச்சிருக்கு. Temperature {min_temp}°C-la irundhu {max_temp}°C (avg {avg_temp}°C) and salinity {min_sal} PSU-la irundhu {max_sal} PSU (avg {avg_sal} PSU) varaikum irukku. Profile data keela paakalaam."
+            elif lang == "hi":
+                return f"Bilkul 🌊 {region_str} mein {float_count} float(s) se {count_fmt} real ARGO observations mil gaye hain. Temperature {min_temp}°C se {max_temp}°C (avg {avg_temp}°C) aur salinity {min_sal} PSU se {max_sal} PSU (avg {avg_sal} PSU) tak hai. Profile data neeche dekhein."
+            else:
+                return f"🌊 I found {count_fmt} real ARGO observations across {float_count} float(s) in {region_str}. The observed temperature ranges from {min_temp}°C to {max_temp}°C (average {avg_temp}°C), and salinity ranges from {min_sal} PSU to {max_sal} PSU (average {avg_sal} PSU). Explore the interactive profiles below."
+
+        # Fallback if no specific numerical stats available
+        return f"Sure 🌊 I pulled {count_fmt} real ARGO observations across {float_count} float(s) in {region_str}. The profile data is ready below so you can inspect depth profiles."
 
     def execute_nl_query(self, query_text: str, history: Optional[List[Dict[str, str]]] = None) -> NLExecutionResponse:
         """
@@ -673,7 +749,8 @@ class QueryService:
             count=len(enriched_results),
             float_count=len(float_ids_set),
             anomaly_summary=anomaly_summary,
-            lang=lang
+            lang=lang,
+            results=enriched_results
         )
 
         end_total = time.perf_counter()
@@ -1976,11 +2053,8 @@ class QueryService:
         # 1. Region filter
         target_region = region if region and region not in ["Global Ocean", "Custom / All", "All Available", "All"] else None
         if target_region:
-            if target_region == "Indian Ocean":
-                conditions.append("region IN ('Bay of Bengal', 'Arabian Sea', 'Indian Ocean')")
-            else:
-                conditions.append("region = ?")
-                params.append(target_region)
+            conditions.append("region = ?")
+            params.append(target_region)
 
         # 2. Time range filter
         max_dt_str = "2026-05-25T15:56:48"
@@ -2215,7 +2289,7 @@ class QueryService:
                         avg_s = round(s["avg_s"], 1) if (s and s["avg_s"] is not None) else None
 
                     has_obs = f_cnt > 0
-                    reg_anom_cnt = len([a for a in anomalies if a.get("region") == reg_name]) if reg_name in ["Bay of Bengal", "Arabian Sea"] else len(anomalies)
+                    reg_anom_cnt = len([a for a in anomalies if a.get("region") == reg_name]) if target_region is None else (len(anomalies) if (reg_name == target_region or target_region in reg_name) else 0)
 
                     regional_summaries[reg_key] = {
                         "temp_pattern": f"{avg_t}°C upper column average" if (has_obs and avg_t is not None) else "No real ARGO observations available",
@@ -2253,14 +2327,18 @@ class QueryService:
                 w_groups[w_str].append(r)
                 d_groups[d_str].append(r)
 
-            def build_trend_points(group_dict, limit=12):
+            def build_trend_points(group_dict, limit=60):
                 keys = sorted(group_dict.keys())[-limit:]
-                t_list, s_list, f_list = [], [], []
+                t_list, s_list, f_list, th_list = [], [], [], []
                 for k in keys:
                     grp = group_dict[k]
                     t_vals = [r["temperature_c"] for r in grp if r.get("temperature_c") is not None]
                     s_vals = [r["salinity_psu"] for r in grp if r.get("salinity_psu") is not None]
                     fc = len(set(r["float_id"] for r in grp))
+                    
+                    # Compute group thermocline estimate
+                    th_res = detect_thermocline(grp[:50])
+                    th_val = th_res.get("estimated_thermocline_depth_m")
 
                     if t_vals:
                         t_avg = round(sum(t_vals) / len(t_vals), 2)
@@ -2268,24 +2346,29 @@ class QueryService:
                     if s_vals:
                         s_avg = round(sum(s_vals) / len(s_vals), 2)
                         s_list.append({"date": k, "val": s_avg, "baseline": round(raw_baseline_sal or s_avg, 2), "isAnomaly": False, "unit": "PSU"})
+                    if th_val is not None:
+                        th_list.append({"date": k, "val": round(th_val, 1), "baseline": round(thermocline_depth or th_val, 1), "isAnomaly": False, "unit": "m"})
                     f_list.append({"date": k, "val": fc, "baseline": fc, "isAnomaly": False, "unit": "floats"})
-                return t_list, s_list, f_list
+                return t_list, s_list, f_list, th_list
 
-            m_t, m_s, m_f = build_trend_points(m_groups, 12)
-            w_t, w_s, w_f = build_trend_points(w_groups, 10)
-            d_t, d_s, d_f = build_trend_points(d_groups, 10)
+            m_t, m_s, m_f, m_th = build_trend_points(m_groups, 36)
+            w_t, w_s, w_f, w_th = build_trend_points(w_groups, 30)
+            d_t, d_s, d_f, d_th = build_trend_points(d_groups, 30)
 
             trends["Temperature"]["Monthly"] = m_t
             trends["Salinity"]["Monthly"] = m_s
             trends["Float Count"]["Monthly"] = m_f
+            trends["Thermocline Depth"]["Monthly"] = m_th
 
             trends["Temperature"]["Weekly"] = w_t
             trends["Salinity"]["Weekly"] = w_s
             trends["Float Count"]["Weekly"] = w_f
+            trends["Thermocline Depth"]["Weekly"] = w_th
 
             trends["Temperature"]["Daily"] = d_t
             trends["Salinity"]["Daily"] = d_s
             trends["Float Count"]["Daily"] = d_f
+            trends["Thermocline Depth"]["Daily"] = d_th
 
         return {
             "query_info": {

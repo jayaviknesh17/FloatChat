@@ -5,7 +5,6 @@ Translates natural-language oceanographic questions into validated QueryRequest 
 
 import re
 import json
-import sqlite3
 import ssl
 import certifi
 import urllib.request
@@ -22,6 +21,7 @@ from backend.app.models.query_schema import (
     ALLOWED_ANALYSES,
 )
 from backend.app.utils.logging import get_logger
+from backend.app.services.general_knowledge_service import general_knowledge_service
 
 logger = get_logger("nl_query_service")
 
@@ -92,9 +92,9 @@ class NLQueryService:
         tanglish_strong = [
             r'\bvanakkam\b', r'\bkaatu\b', r'\bkaattu\b', r'\bkaatunga\b',
             r'\bsollu\b', r'\bsollo\b', r'\bsolla\b', r'\bpaaru\b', r'\bpaar\b',
-            r'\biruku\b', r'\birukkum\b', r'\bkudungka\b', r'\bkudu\b',
+            r'\biruku\b', r'\birukkum\b', r'\birukku\b', r'\bkudungka\b', r'\bkudu\b',
             r'\bnandri\b', r'\btanglish\b', r'\bsollunga\b', r'\bkatanga\b',
-            r'\benna\b', r'\bnaa?\b', r'\beda\b', r'\bda\b'
+            r'\benna\b', r'\benga\b', r'\binga\b', r'\bnaa?\b', r'\beda\b', r'\bda\b'
         ]
         if any(re.search(pat, lower) for pat in tanglish_strong):
             return "ta"
@@ -185,14 +185,16 @@ class NLQueryService:
 
         # 2. Extract current query explicit entities
         current_region = None
-        if any(r in lower for r in ["bay of bengal", "bob", "bengal la", "bengal", "வங்காள விரிகுடா", "बंगाल की खाड़ी"]):
+        if any(r in lower for r in ["bay of bengal", "bob", "bengal la", "bengal", "chennai", "வங்காள விரிகுடா", "बंगाल की खाड़ी"]):
             current_region = "bay_of_bengal"
-        elif any(r in lower for r in ["arabian sea", "arabian", "அரபிக்கடல்", "अरब सागर"]):
+        elif any(r in lower for r in ["arabian sea", "arabian", "kanyakumari", "அரபிக்கடல்", "अरब सागर"]):
             current_region = "arabian_sea"
+        elif any(r in lower for r in ["indian ocean", "indian", "இந்தியப் பெருங்கடல்", "हिंद महासागर"]):
+            current_region = "indian_ocean"
 
         current_variable = None
-        has_temp = any(v in lower for v in ["temperature", "temp", "°c", "வெப்பநிலை", "तापमान", "thermocline"])
-        has_psal = any(v in lower for v in ["salinity", "psal", "psu", "உவர்ப்பு", "लवणता", "halocline"])
+        has_temp = any(v in lower for v in ["temperature", "temp", "°c", "வெப்பநிலை", "तापमान"])
+        has_psal = any(v in lower for v in ["salinity", "psal", "psu", "உவர்ப்பு", "लवणता"])
         if has_temp and has_psal:
             current_variable = "both"
         elif has_temp:
@@ -233,18 +235,25 @@ class NLQueryService:
             )
         )
 
-        # 4. Strict Entity Resolution: Explicit Current Entities OVERRIDE History
-        resolved_region = current_region if current_region is not None else history_region
-        resolved_variable = current_variable if current_variable is not None else history_variable
-        resolved_topic = current_topic if current_topic is not None else history_topic
-        resolved_analysis = current_analysis if current_analysis is not None else (history_analysis if is_followup else None)
-
-        # 5. Intent Resolution Priority
+        # 4. Intent & Entity Resolution Priority
         has_float_id_or_cycle = bool(
             re.search(r'\b(?:float|platform)\s*#?\s*\d{7}\b', lower) or
             re.search(r'\b\d{7}\b', lower) or
             re.search(r'\bcycle\s*#?\s*\d+\b', lower)
         )
+
+        # Explicit Float ID / Cycle queries take strict priority and DO NOT inherit previous history constraints
+        # (region, variable, analysis) unless explicitly specified in the current query.
+        if has_float_id_or_cycle:
+            resolved_region = current_region
+            resolved_variable = current_variable
+            resolved_topic = current_topic
+            resolved_analysis = current_analysis
+        else:
+            resolved_region = current_region if current_region is not None else history_region
+            resolved_variable = current_variable if current_variable is not None else history_variable
+            resolved_topic = current_topic if current_topic is not None else history_topic
+            resolved_analysis = current_analysis if current_analysis is not None else (history_analysis if is_followup else None)
 
         data_action_verbs = [
             "show", "find", "get", "retrieve", "fetch", "query", "plot", "extract",
@@ -260,46 +269,101 @@ class NLQueryService:
         out_of_scope_regions = ["pacific", "atlantic", "arctic", "southern ocean", "mediterranean"]
         has_out_of_scope = any(r in lower for r in out_of_scope_regions)
 
-        is_conceptual_prefix = any(lower.startswith(p) or f" {p}" in lower for p in ["what is ", "what are ", "explain ", "tell me about", "what does ", "how does ", "what can you tell me"])
-        has_explanation_keyword = any(kw in lower for kw in ["explanation of", "explain", " என்ன", "என்னது", "क्या है", "क्या होता है"])
+        location_phrases = [
+            r'\bwhere is\b', r'\bwhere\'s\b', r'\bwhere are\b', r'\blocation of\b', r'\blocated\b', r'\blocation\b',
+            r'\bwhich ocean\b', r'\bwhich sea\b', r'\bnear which ocean\b', r'\bnear which sea\b',
+            r'\bnearby which ocean\b', r'\bnearby which sea\b', r'\bis near\b', r'\bis nearby\b', r'\bis next to\b',
+            r'\benga irukku\b', r'\benga iruku\b', r'\benga\b', r'எங்க இருக்கு', r'எங்கே உள்ளது', r'எங்க',
+            r'\bkahan hai\b', r'\bkaha hai\b', r'कहां स्थित है', r'कहाँ है', r'\bkahan\b'
+        ]
+        has_location_query = any(re.search(pat, lower) for pat in location_phrases)
+
+        is_region_only_query = lower.strip() in [
+            "arabian sea", "the arabian sea", "arabian",
+            "bay of bengal", "the bay of bengal", "bengal",
+            "indian ocean", "the indian ocean"
+        ]
+
+        is_measurement_question = any(p in lower for p in [
+            "what is the temperature", "what's the temperature", "temperature in", "temperature of",
+            "what is the salinity", "what's the salinity", "salinity in", "salinity of",
+            "what is the depth", "what's the depth", "depth of",
+            "what are the observations", "what are the anomalies",
+            "thermocline in", "thermocline of", "thermocline depth", "what is the thermocline depth", "what is thermocline depth"
+        ]) or ("thermocline" in lower and current_region is not None)
+
+        definition_phrases = [
+            "what is ", "what is a ", "what is the ", "what are ", "explain ", "tell me about ",
+            "how do ", "why is ", "what does ", "na enna", "என்னது", "என்னனா", "kya hai", "क्या है", "kya hota hai",
+            "explanation of", "explanation"
+        ]
+        has_definition_query = (not is_measurement_question) and (
+            any(phrase in lower for phrase in definition_phrases) or
+            any(lower.startswith(p) for p in ["what is", "explain", "where is", "how do", "why is", "tell me"])
+        )
+
+        has_explicit_measurement = is_measurement_question or (
+            (current_variable is not None and not has_definition_query and (has_data_action or has_data_noun or "in " in lower or "la " in lower or "la?" in lower or "mein" in lower or "enna" in lower)) or
+            (("anomal" in lower or "outlier" in lower or "deviation" in lower) and not has_definition_query and not (lower.startswith("explain") or lower.startswith("what"))) or
+            bool(re.search(r'\b\d+\s*m\b', lower)) or
+            bool(re.search(r'\bat\s+\d+', lower))
+        )
+
         has_raw_data_keyword = any(kw in lower for kw in ["observations", "measurements", "data points", "raw data"])
 
         # Priority 1: Float ID / cycle number or out of scope region -> scientific
         if has_float_id_or_cycle or has_out_of_scope:
             intent = "scientific"
 
-        # Priority 2: Standalone Conceptual Questions / Explanations ("Explain thermocline", "Show me an explanation of thermocline")
-        elif (is_conceptual_prefix or has_explanation_keyword) and not has_raw_data_keyword and not current_region:
+        # Priority 2: Exact Depth follow-up
+        elif any(phrase in lower for phrase in ["exact depth", "depth sollu", "depth batao", "what is the depth"]):
+            intent = "depth_followup"
+
+        # Priority 3: Conceptual Follow-up Queries ("Bay of Bengal la irukuma?" following "What is thermocline?")
+        elif is_followup and history and (not has_scientific_results) and resolved_topic and not current_variable and not has_data_action and not has_data_noun:
+            intent = "conversational_followup"
+
+        # Priority 4: Geographic / Location Questions & Region-only queries ("where is arabian sea located", "Arabian Sea enga irukku?", "arabian sea")
+        elif (has_location_query or is_region_only_query) and not (has_data_action or has_data_noun or has_float_id_or_cycle or current_variable is not None):
+            intent = "conversational"
+            resolved_region = current_region
+            resolved_variable = None
+
+        # Priority 5: General Educational / Definition Questions ("what is the arabian sea", "what is thermocline", "thermocline na enna?", "what is ARGO", "Show me an explanation of thermocline")
+        elif has_definition_query and not has_explicit_measurement and not has_data_noun:
             intent = "conversational"
 
-        # Priority 3: Anomaly request -> scientific
+        # Priority 6: Anomaly request -> scientific
         elif "anomal" in lower:
             intent = "scientific"
             if not resolved_variable:
                 resolved_variable = "temperature"
             resolved_analysis = "anomaly"
 
-        # Priority 3: Exact Depth follow-up
-        elif any(phrase in lower for phrase in ["exact depth", "depth sollu", "depth batao", "what is the depth", "depth ?"]):
-            intent = "depth_followup"
+        # Priority 6b: Thermocline measurement with region or explicit depth request -> scientific
+        elif "thermocline" in lower and ((current_region or resolved_region) or "depth" in lower or has_data_action or has_data_noun):
+            intent = "scientific"
+            if not resolved_variable:
+                resolved_variable = "temperature"
+            resolved_analysis = "thermocline"
 
-        # Priority 4: Conceptual follow-up ("bay of bengal la irukuma?" after "What is thermocline?")
-        elif is_followup and (resolved_topic in ["thermocline", "halocline", "salinity", "temperature"] or "irukuma" in lower or "mein hai" in lower) and not (has_data_action or has_data_noun):
-            intent = "conversational_followup"
-
-        # Priority 5: Region & Variable both present (e.g. "What is the temperature in Bay of Bengal?", "Arabian Sea salinity", "Show temperature in Bay of Bengal")
-        elif resolved_region and resolved_variable:
+        # Priority 7: Explicit Real Data Queries ("What is the temperature in the Arabian Sea?", "Arabian Sea la temperature enna?", "Arabian Sea salinity", "Show temperature observations in Bay of Bengal")
+        elif (current_region or resolved_region) and (current_variable or resolved_variable) and not has_definition_query:
             intent = "scientific"
 
-        # Priority 6: Data action or noun without region/variable (e.g. "Show me data", "Show ocean data") -> scientific (so parser produces clarification_needed)
+        # Priority 8: Data action or noun without region/variable -> scientific
         elif has_data_action or has_data_noun:
             intent = "scientific"
 
-        # Priority 7: Follow-up with region & variable from history
-        elif is_followup and resolved_region and resolved_variable and has_scientific_results:
+        # Priority 9: Follow-up queries in an ARGO Data conversation ("what about salinity?")
+        elif is_followup and history and (has_scientific_results or current_variable or current_region or "salinity" in lower or "temperature" in lower):
             intent = "scientific"
+            if "salinity" in lower and not current_variable:
+                resolved_variable = "salinity"
+            elif "temperature" in lower and not current_variable:
+                resolved_variable = "temperature"
 
-        # Priority 8: Greetings & Capabilities
+        # Priority 10: Greetings & Capabilities
         elif any(w in lower for w in ["hi", "hello", "hey", "vanakkam", "namaste"]) and len(lower.split()) <= 4:
             intent = "conversational"
 
@@ -328,11 +392,6 @@ class NLQueryService:
             resolved_text = f"{query_text} (regarding {' in '.join(ctx_parts)})"
             return resolved_text, ctx.topic
         return query_text, None
-
-    def execute_nl_query(self, query_text: str, history: Optional[List[Dict[str, str]]] = None) -> Any:
-        """Compatibility wrapper delegating to QueryService.execute_nl_query."""
-        from backend.app.services.query_service import QueryService
-        return QueryService().execute_nl_query(query_text, history=history)
 
     def parse_query(self, query_text: str, history: Optional[List[Dict[str, str]]] = None) -> NLQueryOutput:
         """
@@ -455,45 +514,32 @@ class NLQueryService:
 
         return self._validate_and_build_output(ctx.original_query, merged_params, lang)
 
-    def get_latest_observation_date(self, float_id: Optional[str] = None, region: Optional[str] = None) -> datetime:
-        """
-        Dynamically query SQLite DB for the latest observation date for a float, region, or dataset.
-        Returns datetime object anchored to actual dataset contents.
-        """
-        try:
-            db_path = getattr(settings, "DB_PATH", "data/processed/argo_observations.db")
-            with sqlite3.connect(db_path) as conn:
-                cursor = conn.cursor()
-                if float_id:
-                    cursor.execute("SELECT MAX(profile_time) FROM argo_observations WHERE float_id = ?", (str(float_id),))
-                elif region:
-                    db_region = "Bay of Bengal" if "bengal" in region.lower() else ("Arabian Sea" if "arabian" in region.lower() else region)
-                    cursor.execute("SELECT MAX(profile_time) FROM argo_observations WHERE region = ?", (db_region,))
-                else:
-                    cursor.execute("SELECT MAX(profile_time) FROM argo_observations")
-                
-                row = cursor.fetchone()
-                if row and row[0]:
-                    time_str = str(row[0]).split('T')[0]
-                    return datetime.strptime(time_str, "%Y-%m-%d")
-        except Exception as e:
-            logger.warning(f"Failed to query latest observation date from SQLite DB: {e}")
-
-        return datetime.now()
-
-    def _extract_rule_params(self, text: str) -> Dict[str, Any]:
-        """Extract explicit scientific parameters from current query text using rule matching."""
-        lower_text = text.lower()
+    def _extract_rule_params(self, clean_query: str) -> Dict[str, Any]:
+        """Extract query parameters deterministically using regex rules."""
+        lower_text = clean_query.lower()
         parsed_params: Dict[str, Any] = {}
 
-        if any(r in lower_text for r in ["bay of bengal", "bob", "बंगाल की खाड़ी", "வங்காள விரிகுடா", "bengal la", "bengal"]):
-            parsed_params["region"] = "bay_of_bengal"
-        elif any(r in lower_text for r in ["arabian sea", "arabian", "अरब सागर", "அரபிக்கடல்"]):
-            parsed_params["region"] = "arabian_sea"
+        # 1. Float ID / WMO number
+        float_match = re.search(r'\b(?:float|platform)\s*#?\s*(\d{7})\b', lower_text) or re.search(r'\b(\d{7})\b', lower_text)
+        if float_match:
+            parsed_params["float_id"] = float_match.group(1)
 
-        has_temp = any(v in lower_text for v in ["temperature", "temp", "°c", "तापमान", "வெப்பநிலை", "thermocline"])
-        has_psal = any(v in lower_text for v in ["salinity", "psal", "psu", "लवणता", "உவர்ப்பளவு", "உவர்ப்பு", "halocline"])
+        # 2. Cycle number
+        cycle_match = re.search(r'\bcycle\s*#?\s*(\d+)\b', lower_text)
+        if cycle_match:
+            parsed_params["cycle_number"] = int(cycle_match.group(1))
 
+        # 3. Canonical Regions
+        if any(r in lower_text for r in ["bay of bengal", "bob", "bengal la", "bengal", "chennai", "வங்காள விரிகுடா", "बंगाल की खाड़ी"]):
+            parsed_params["region"] = "Bay of Bengal"
+        elif any(r in lower_text for r in ["arabian sea", "arabian", "kanyakumari", "அரபிக்கடல்", "अरब सागर"]):
+            parsed_params["region"] = "Arabian Sea"
+        elif any(r in lower_text for r in ["indian ocean", "indian", "இந்தியப் பெருங்கடல்", "हिंद महासागर"]):
+            parsed_params["region"] = "Indian Ocean"
+
+        # 4. Variables
+        has_temp = any(v in lower_text for v in ["temperature", "temp", "°c", "வெப்பநிலை", "तापमान"])
+        has_psal = any(v in lower_text for v in ["salinity", "psal", "psu", "உவர்ப்பு", "लवणता"])
         if has_temp and has_psal:
             parsed_params["variable"] = "both"
         elif has_temp:
@@ -501,78 +547,43 @@ class NLQueryService:
         elif has_psal:
             parsed_params["variable"] = "salinity"
 
-        float_match = re.search(r'\b(?:float|platform)\s*(?:id\s*)?#?\s*(\d{7})\b', lower_text)
-        if not float_match:
-            float_match = re.search(r'\b(\d{7})\b', lower_text)
-        if float_match:
-            parsed_params["float_id"] = float_match.group(1)
+        # 5. Dates & Relative Dates
+        now = datetime.now()
+        year_range_match = re.search(r'from\s+(?:january\s+)?(\d{4})\s+to\s+(?:december\s+)?(\d{4})', lower_text)
+        if year_range_match:
+            parsed_params["start_date"] = f"{year_range_match.group(1)}-01-01"
+            parsed_params["end_date"] = f"{year_range_match.group(2)}-12-31"
+        elif any(p in lower_text for p in ["last 6 months", "past 6 months", "last six months", "6 months", "கடைசி 6 மாதம்"]):
+            parsed_params["start_date"] = (now - timedelta(days=182)).strftime("%Y-%m-%d")
+            parsed_params["end_date"] = now.strftime("%Y-%m-%d")
+        elif any(p in lower_text for p in ["last year", "past year", "last 1 year", "12 months", "1 year"]):
+            parsed_params["start_date"] = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+            parsed_params["end_date"] = now.strftime("%Y-%m-%d")
 
-        cycle_match = re.search(r'\bcycle\s*#?\s*(\d+)\b', lower_text)
-        if cycle_match:
-            try:
-                parsed_params["cycle_number"] = int(cycle_match.group(1))
-            except ValueError:
-                pass
-
-        # Depth extraction rules
-        below_match = re.search(r'(?:below|deeper than|under|>)\s*(\d+(?:\.\d+)?)\s*(?:meters|metres|m|dbar)?', lower_text)
-        above_match = re.search(r'(?:above|shallower than|<)\s*(\d+(?:\.\d+)?)\s*(?:meters|metres|m|dbar)?', lower_text)
-        upper_match = re.search(r'upper\s*(\d+(?:\.\d+)?)\s*(?:meters|metres|m|dbar)?', lower_text)
-        between_match = re.search(r'(?:between|from)?\s*(\d+(?:\.\d+)?)\s*(?:and|to|-)\s*(\d+(?:\.\d+)?)\s*(?:meters|metres|m|dbar)?', lower_text)
-
-        if "surface" in lower_text:
+        # 6. Depth
+        if "surface" in lower_text or "மேற்பரப்பு" in lower_text:
             parsed_params["depth_min"] = 0.0
             parsed_params["depth_max"] = 10.0
-        elif upper_match:
+
+        upper_match = re.search(r'upper\s+(\d+)\s*m', lower_text)
+        if upper_match:
             parsed_params["depth_min"] = 0.0
             parsed_params["depth_max"] = float(upper_match.group(1))
-        elif below_match and "between" not in lower_text and "from" not in lower_text:
-            parsed_params["depth_min"] = float(below_match.group(1))
-            parsed_params["depth_max"] = 12000.0
-        elif above_match and "between" not in lower_text and "from" not in lower_text:
-            parsed_params["depth_min"] = 0.0
-            parsed_params["depth_max"] = float(above_match.group(1))
-        elif between_match and ("between" in lower_text or "from" in lower_text or "depth" in lower_text or "m" in lower_text):
-            d1 = float(between_match.group(1))
-            d2 = float(between_match.group(2))
-            parsed_params["depth_min"] = min(d1, d2)
-            parsed_params["depth_max"] = max(d1, d2)
 
-        # Dynamic dataset date resolution
-        ref_date = self.get_latest_observation_date(
-            float_id=parsed_params.get("float_id"),
-            region=parsed_params.get("region")
-        )
+        between_match = re.search(r'between\s+(\d+)\s+and\s+(\d+)\s*m', lower_text)
+        if between_match:
+            parsed_params["depth_min"] = float(between_match.group(1))
+            parsed_params["depth_max"] = float(between_match.group(2))
 
-        if any(kw in lower_text for kw in ["last 6 months", "last six months", "past 6 months", "past six months", "6 months"]):
-            parsed_params["start_date"] = (ref_date - timedelta(days=182)).strftime("%Y-%m-%d")
-            parsed_params["end_date"] = ref_date.strftime("%Y-%m-%d")
-        elif any(kw in lower_text for kw in ["last year", "past year", "last 12 months", "last twelve months", "past 12 months", "12 months"]):
-            parsed_params["start_date"] = (ref_date - timedelta(days=365)).strftime("%Y-%m-%d")
-            parsed_params["end_date"] = ref_date.strftime("%Y-%m-%d")
-        elif "recent" in lower_text or "latest" in lower_text:
-            parsed_params["start_date"] = (ref_date - timedelta(days=90)).strftime("%Y-%m-%d")
-            parsed_params["end_date"] = ref_date.strftime("%Y-%m-%d")
-        else:
-            years = re.findall(r'\b(20\d{2})\b', lower_text)
-            if len(years) >= 2:
-                parsed_params["start_date"] = f"{years[0]}-01-01"
-                parsed_params["end_date"] = f"{years[1]}-12-31"
-            elif len(years) == 1:
-                if "summer" in lower_text:
-                    parsed_params["start_date"] = f"{years[0]}-06-01"
-                    parsed_params["end_date"] = f"{years[0]}-08-31"
-                elif "winter" in lower_text:
-                    parsed_params["start_date"] = f"{years[0]}-12-01"
-                    parsed_params["end_date"] = f"{years[0]}-02-28"
-                elif "monsoon" in lower_text:
-                    parsed_params["start_date"] = f"{years[0]}-06-01"
-                    parsed_params["end_date"] = f"{years[0]}-09-30"
-                else:
-                    parsed_params["start_date"] = f"{years[0]}-01-01"
-                    parsed_params["end_date"] = f"{years[0]}-12-31"
+        depth_num_match = re.search(r'\b(?:at|depth)\s*(\d+)\s*m?\b', lower_text)
+        if depth_num_match and "depth_max" not in parsed_params:
+            d_val = float(depth_num_match.group(1))
+            if d_val > 0:
+                parsed_params["depth_min"] = max(0.0, d_val - 25.0)
+                parsed_params["depth_max"] = d_val + 25.0
 
-        if "anomal" in lower_text or "heatwave" in lower_text:
+        # 7. Analysis Type
+        if any(term in lower_text for term in ["anomaly", "anomalies", "outlier", "deviation", "அதே மாதிரி", "விதிவிலக்கு"]):
             parsed_params["analysis"] = "anomaly"
         elif "thermocline" in lower_text:
             parsed_params["analysis"] = "thermocline"
@@ -606,20 +617,25 @@ class NLQueryService:
                 f"{h.get('role', 'user').title()}: {h.get('content', '')}" for h in history[-4:]
             )
 
+        kb_match = general_knowledge_service.find_best_match(ctx.clean_query)
+        ref_kb_str = f"\nCurated Knowledge Answer Reference: \"{kb_match['answer']}\"" if kb_match else ""
+
         prompt = f"""{FLOATCHAT_SYSTEM_PROMPT}
 
 Target Response Language: '{ctx.response_language}' ('en', 'ta', or 'hi')
 Resolved Topic: '{ctx.topic or "None"}'
 Resolved Region: '{ctx.region or "None"}'
 Intent Classification: '{ctx.intent}'
+{ref_kb_str}
 {history_str}
 User Message: "{ctx.clean_query}"
 
 Task: Respond to the user naturally and concisely as FloatChat in target language '{ctx.response_language}'.
 - Speak like a friendly ChatGPT ocean assistant.
+- If a curated knowledge reference is provided above, use it as the source of truth to provide a clear, educational answer. DO NOT claim to query ARGO observations or fabricate numbers.
 - If intent is 'conversational_followup', answer contextually regarding topic '{ctx.topic}' in '{ctx.region}'.
 - If intent is 'depth_followup', explain that calculating exact depth requires selecting a specific ARGO profile. Do NOT invent numbers or fabricate depths.
-- Keep response to 1-3 paragraphs. End with a subtle follow-up suggestion if helpful.
+- Keep response to 1-3 brief paragraphs.
 """
 
         payload = {
@@ -634,7 +650,7 @@ Task: Respond to the user naturally and concisely as FloatChat in target languag
                 headers={"Content-Type": "application/json"}
             )
 
-            with urllib.request.urlopen(req, context=ssl_ctx, timeout=3) as resp:
+            with urllib.request.urlopen(req, context=ssl_ctx, timeout=8) as resp:
                 body = resp.read().decode("utf-8")
                 data = json.loads(body)
                 raw_content = data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -657,7 +673,7 @@ Task: Respond to the user naturally and concisely as FloatChat in target languag
         ctx_or_text: Union[ResolvedContext, str],
         history: Optional[List[Dict[str, str]]] = None
     ) -> str:
-        """Upgraded natural conversational offline response generator for English, Tanglish, and Hinglish."""
+        """Upgraded natural conversational offline response generator backed by 150 Q&A Knowledge Base."""
         if isinstance(ctx_or_text, str):
             ctx = self.resolve_context(ctx_or_text, history)
         else:
@@ -671,7 +687,7 @@ Task: Respond to the user naturally and concisely as FloatChat in target languag
         # 0. Context follow-up responses
         if ctx.intent == "conversational_followup":
             topic_str = ctx.topic or "thermocline"
-            region_disp = "Bay of Bengal" if ctx.region == "bay_of_bengal" else ("Arabian Sea" if ctx.region == "arabian_sea" else "ocean")
+            region_disp = "Bay of Bengal" if ctx.region == "bay_of_bengal" else ("Arabian Sea" if ctx.region == "arabian_sea" else ("Indian Ocean" if ctx.region == "indian_ocean" else "ocean"))
 
             if lang == "ta":
                 return f"Yes 🌊 {region_disp} ARGO profiles-layum {topic_str} detect panna mudiyum! Oru specific float/profile select panna, exact {topic_str} depth calculate panni kaamikalaam."
@@ -682,7 +698,7 @@ Task: Respond to the user naturally and concisely as FloatChat in target languag
 
         if ctx.intent == "depth_followup":
             topic_str = ctx.topic or "thermocline"
-            region_disp = "Bay of Bengal" if ctx.region == "bay_of_bengal" else ("Arabian Sea" if ctx.region == "arabian_sea" else "ocean")
+            region_disp = "Bay of Bengal" if ctx.region == "bay_of_bengal" else ("Arabian Sea" if ctx.region == "arabian_sea" else ("Indian Ocean" if ctx.region == "indian_ocean" else "ocean"))
 
             if lang == "ta":
                 return f"Exact depth சொல்லணும்னா ஒரு specific ARGO profile தேவை. {region_disp} profile select pannina, actual {topic_str} depth calculate panni kaamikka mudiyum. 🌊"
@@ -692,7 +708,7 @@ Task: Respond to the user naturally and concisely as FloatChat in target languag
                 return f"To calculate the exact {topic_str} depth, a specific ARGO float profile is required. Select a {region_disp} profile below to view its calculated depth! 🌊"
 
         # 1. Greetings & Capabilities
-        is_greeting = (len(words) <= 4 and any(w in ["hi", "hii", "hello", "hey", "greetings", "howdy", "vanakkam", "namaste", "namaskar", "வணக்கம்", "नमस्ते", "हैलो"] for w in words))
+        is_greeting = (len(clean_text.split()) <= 4 and any(w in lower for w in ["hi", "hii", "hello", "hey", "greetings", "howdy", "vanakkam", "namaste", "namaskar", "வணக்கம்", "नमस्ते", "हैलो"]))
         is_capability = any(ph in lower for ph in ["what can you do", "who are you", "capabilities", "what do you do", "தமிழில் சொல்லு", "தமிழ்", "हिंदी में बताओ", "हिंदी"])
 
         if is_greeting or is_capability:
@@ -712,31 +728,16 @@ Task: Respond to the user naturally and concisely as FloatChat in target languag
             else:
                 return "You're welcome! 🌊 Let me know what ocean data you'd like to explore next!"
 
-        # 3. Thermocline Explanation
-        if "thermocline" in lower or ctx.topic == "thermocline":
-            if lang == "ta":
-                return "Thermocline na ocean-la depth increase aagumbodhu temperature fast-ah change aagura layer 🌊.\nSimple-ah sonna, warm surface water-um cold deep water-um separate panra transition zone dhaan thermocline. FloatChat-la ARGO profile use panni indha layer-ai estimate pannalaam."
-            elif lang == "hi":
-                return "Thermocline woh ocean layer hai jahan depth ke saath temperature bahut tezi se badalta hai 🌊.\nSimple words mein, yeh warm surface water aur cold deep ocean ke beech ka transition zone hai. FloatChat mein hum ARGO profile se iski depth estimate kar sakte hain."
-            else:
-                return "Thermocline is the ocean layer where temperature drops rapidly with depth — separating the warm sunlit surface water from the cold deep ocean 🌊. In FloatChat, I estimate this layer directly from ARGO temperature profiles. Want to explore a profile to see it?"
+        # 3. Look up in 150 Q&A Knowledge Base
+        kb_match = general_knowledge_service.find_best_match(clean_text)
+        if kb_match:
+            ans = kb_match["answer"]
+            if not ans.endswith("🌊") and not ans.endswith("🌊."):
+                return f"{ans} 🌊"
+            return ans
 
-        # 4. Salinity / Halocline Explanation
-        if "salinity" in lower or "halocline" in lower or "உவர்ப்பு" in lower or "लवणता" in lower or ctx.topic == "salinity":
-            if lang == "ta":
-                return "Salinity na seawater-la evvalavu dissolved salt irukko adhodha alavu (PSU-la) 🌊. Depth poruthu salinity vegama maarina halocline uruvaagum. FloatChat-la ARGO salinity profiles analyse pannalaam."
-            elif lang == "hi":
-                return "Salinity ka matlab hai seawater mein ghula hua namak (PSU mein) 🌊. Depth ke saath salinity tezi se badalne par halocline banta hai. FloatChat mein hum ARGO salinity profiles analyse karte hain."
-            else:
-                return "Salinity measures dissolved salt concentration in seawater (in PSU) 🌊. Rapid salinity changes with depth form a halocline. In FloatChat, we analyze real ARGO salinity profiles to detect these layers."
-
-        # 5. Fallback general conversational response
-        if lang == "ta":
-            return "Hey! 👋 Naan FloatChat. Real ARGO ocean data-ve explore panna 'Show temperature in Bay of Bengal' madhiri questions kekkalaam."
-        elif lang == "hi":
-            return "Hey! 👋 Main FloatChat hoon. Ocean data explore karne ke liye 'Show temperature in Bay of Bengal' jaise sawaal pooch sakte ho."
-        else:
-            return "Hey! 👋 I'm FloatChat. You can ask me to explain ocean concepts or request data queries like 'Show temperature in Bay of Bengal'."
+        # 4. Fallback for unindexed general queries
+        return general_knowledge_service.get_fallback_general_response(clean_text)
 
     def generate_gemini_scientific_summary(
         self,
@@ -782,7 +783,7 @@ Task: Write a natural, friendly, 2-3 sentence AI assistant response in language 
                 headers={"Content-Type": "application/json"}
             )
 
-            with urllib.request.urlopen(req, context=ctx, timeout=3) as resp:
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
                 body = resp.read().decode("utf-8")
                 data = json.loads(body)
                 content = data["candidates"][0]["content"]["parts"][0]["text"].strip()
