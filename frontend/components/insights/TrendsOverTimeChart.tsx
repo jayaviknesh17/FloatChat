@@ -5,6 +5,7 @@ import { TrendingUp, Thermometer, Droplet, Layers, Activity, Calendar } from "lu
 
 interface TrendsOverTimeChartProps {
   region: string;
+  timeRange?: string;
   variable?: string;
   trendsData?: Record<string, Record<string, Array<{
     date: string;
@@ -15,12 +16,11 @@ interface TrendsOverTimeChartProps {
   }>>>;
 }
 
-export default function TrendsOverTimeChart({ region, variable = "Temperature", trendsData }: TrendsOverTimeChartProps) {
+export default function TrendsOverTimeChart({ region, timeRange = "Full Record", variable = "Temperature", trendsData }: TrendsOverTimeChartProps) {
   const [activeTab, setActiveTab] = useState<"Temperature" | "Salinity" | "Thermocline Depth" | "Float Count">(
     variable.includes("Salinity") ? "Salinity" : "Temperature"
   );
   const [aggregation, setAggregation] = useState<"Daily" | "Weekly" | "Monthly">("Monthly");
-  const [timeRange, setTimeRange] = useState<"Last 6 months" | "Last 1 year" | "Custom">("Last 6 months");
 
   // Dynamic series from real backend data
   const currentSeries = trendsData?.[activeTab]?.[aggregation] || [];
@@ -69,7 +69,7 @@ export default function TrendsOverTimeChart({ region, variable = "Temperature", 
           </p>
         </div>
 
-        {/* Controls: Aggregation (Daily/Weekly/Monthly) & Time Range */}
+        {/* Controls: Aggregation (Daily/Weekly/Monthly) & Synchronized Time Range Badge */}
         <div className="flex flex-wrap items-center gap-2 self-end sm:self-auto">
           {/* Aggregation Selector */}
           <div className="flex items-center gap-1 bg-[#031124] p-1 rounded-xl border border-cyan-500/20 text-xs text-slate-300">
@@ -88,18 +88,10 @@ export default function TrendsOverTimeChart({ region, variable = "Temperature", 
             ))}
           </div>
 
-          {/* Time Range Selector */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#031124] border border-cyan-500/25 text-xs text-slate-300">
+          {/* Synchronized Global Time Range Badge */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#031124] border border-cyan-500/25 text-xs text-slate-300 font-mono-sci">
             <Calendar className="w-3.5 h-3.5 text-cyan-400" />
-            <select
-              value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value as any)}
-              className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer pr-1 font-semibold"
-            >
-              <option value="Last 6 months" className="bg-[#051428] text-white">Last 6 months</option>
-              <option value="Last 1 year" className="bg-[#051428] text-white">Last 1 year</option>
-              <option value="Custom" className="bg-[#051428] text-white">Custom Range</option>
-            </select>
+            <span className="font-semibold text-cyan-200">{timeRange}</span>
           </div>
         </div>
       </div>

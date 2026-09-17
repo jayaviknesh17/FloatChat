@@ -441,8 +441,10 @@ export async function submitOceanQuery(
 
   // Build summary text
   let summaryText = "";
-  if (isConversational) {
-    summaryText = nlResponse.conversational_response || "Hello! I'm FloatChat. I can help you explore real ARGO ocean data, analyze temperature and salinity, detect anomalies, and explore float trajectories.";
+  if (nlResponse.conversational_response) {
+    summaryText = nlResponse.conversational_response;
+  } else if (isConversational) {
+    summaryText = "Hello! I'm FloatChat. I can help you explore real ARGO ocean data, analyze temperature and salinity, detect anomalies, and explore float trajectories.";
   } else if (isClarification) {
     summaryText = nlResponse.clarification || "Query is too vague and lacks target scientific parameters. Please specify region (e.g. Bay of Bengal), variable (temperature/salinity), or float ID.";
   } else if (nlResponse.count === 0) {

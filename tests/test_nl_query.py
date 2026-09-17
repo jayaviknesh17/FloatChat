@@ -129,3 +129,66 @@ def test_api_nl_query_endpoint():
     assert data["interpreted_query"]["depth_max"] == 500.0
     assert "region" in data["filters_applied"]
     assert "variable" in data["filters_applied"]
+
+
+def test_scientific_temperature_arabian_sea():
+    payload = {
+        "query": "what is the temperature in arabian sea"
+    }
+    response = client.post("/api/v1/nl-query/execute", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["status"] == "success"
+    assert data["count"] > 0
+    conv = data.get("conversational_response", "")
+    assert conv != ""
+    assert "ranges from" in conv or "average of" in conv or "°C" in conv
+    assert "I pulled the real ARGO observations for the Arabian Sea. I found 1,000 observations across 2 float(s)..." not in conv
+
+
+def test_anomaly_query_indian_ocean_region_matching():
+    payload = {
+        "query": "show temperature anomalies in indian ocean"
+    }
+    response = client.post("/api/v1/nl-query/execute", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["status"] == "success"
+    assert data["count"] > 0
+    assert data["interpreted_query"]["region"] == "Indian Ocean"
+    conv = data.get("conversational_response", "")
+    assert "Indian Ocean" in conv
+    assert "Arabian Sea" not in conv
+
+    # Verify returned records belong ONLY to Indian Ocean
+    for r in data.get("results", []):
+        assert r.get("region") == "Indian Ocean"
+
+
+def test_float_id_context_priority_over_history():
+    # 1. Query Indian Ocean anomalies first
+    p1 = {"query": "show temperature anomalies in indian ocean"}
+    r1 = client.post("/api/v1/nl-query/execute", json=p1).json()
+    assert r1["status"] == "success"
+
+    history = [
+        {"role": "user", "content": "show temperature anomalies in indian ocean"},
+        {"role": "assistant", "content": r1.get("conversational_response", "")}
+    ]
+
+    # 2. Query Float 2902203 with history
+    p2 = {
+        "query": "Tell me about Float 2902203",
+        "history": history
+    }
+    r2 = client.post("/api/v1/nl-query/execute", json=p2).json()
+    assert r2["status"] == "success"
+    assert r2["count"] > 0
+    assert r2["interpreted_query"]["float_id"] == "2902203"
+    # MUST NOT force region = Indian Ocean from history!
+    assert r2["interpreted_query"]["region"] is None
+
+
+

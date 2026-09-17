@@ -171,6 +171,7 @@ export default function OceanInsightsPage() {
           {/* 4. Trends Over Time Chart */}
           <TrendsOverTimeChart
             region={selectedRegion}
+            timeRange={selectedTimeRange}
             variable={selectedVariable}
             trendsData={insightsSummary?.trends}
           />
