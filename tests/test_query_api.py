@@ -154,3 +154,20 @@ def test_api_get_profile():
     # Verify depth sorting
     depths = [lvl["depth_m"] for lvl in data["levels"]]
     assert depths == sorted(depths)
+
+
+@pytest.mark.skipif(not DB_PATH.exists(), reason="Real SQLite DB not present")
+def test_api_get_visualization_regions():
+    response = client.get("/api/v1/visualization/regions")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_regions" in data
+    assert data["total_regions"] == 12
+    assert "regions" in data
+    assert len(data["regions"]) == 12
+    reg_ids = [r["region_id"] for r in data["regions"]]
+    assert "global_ocean" in reg_ids
+    assert "bay_of_bengal" in reg_ids
+    assert "arabian_sea" in reg_ids
+    assert "western_pacific" in reg_ids
+
