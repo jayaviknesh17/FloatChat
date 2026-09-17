@@ -22,7 +22,21 @@ import {
   ProvenanceDetailResponse,
 } from "./types";
 
-const BACKEND_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BACKEND_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+export async function safeFetch(path: string, options?: RequestInit): Promise<Response> {
+  const primaryUrl = path.startsWith("http") ? path : `${BACKEND_API_URL}${path}`;
+  try {
+    const res = await fetch(primaryUrl, options);
+    if (res.ok) return res;
+  } catch {
+    // Retry fallback
+  }
+
+  const fallbackBase = BACKEND_API_URL.includes("127.0.0.1") ? "http://localhost:8000" : "http://127.0.0.1:8000";
+  const fallbackUrl = path.startsWith("http") ? path.replace("127.0.0.1:8000", "localhost:8000").replace("localhost:8000", "127.0.0.1:8000") : `${fallbackBase}${path}`;
+  return fetch(fallbackUrl, options);
+}
 
 // In-memory cache for instant client-side route transitions & deduplication
 const apiCache = new Map<string, { data: any; timestamp: number }>();
@@ -296,15 +310,15 @@ export async function getSystemStatus(): Promise<SystemStatus> {
     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     const [healthRes, regionsRes, floatsRes] = await Promise.all([
-      fetch(`${BACKEND_API_URL}/api/v1/health`, {
+      safeFetch(`/api/v1/health`, {
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
       }).catch(() => null),
-      fetch(`${BACKEND_API_URL}/api/v1/visualization/regions`, {
+      safeFetch(`/api/v1/visualization/regions`, {
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
       }).catch(() => null),
-      fetch(`${BACKEND_API_URL}/api/v1/visualization/floats`, {
+      safeFetch(`/api/v1/visualization/floats`, {
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
       }).catch(() => null),
@@ -549,6 +563,128 @@ export async function submitOceanQuery(
   };
 }
 
+export interface OceanInsightsSummaryResponse {
+  query_info: {
+    region: string;
+    time_range: string;
+    depth: string;
+    variable: string;
+    is_live_data: boolean;
+    data_source_label: string;
+  };
+  key_insights: {
+    temperature_signal: {
+      observed: string;
+      baseline: string;
+      deviation: string;
+      z_score: string;
+      status_label: string;
+      is_anomaly: boolean;
+    };
+    thermocline_depth: {
+      depth_m: string;
+      explanation: string;
+    };
+    salinity_pattern: {
+      observed: string;
+      baseline: string;
+      deviation: string;
+    };
+    coverage: {
+      active_floats: number;
+      total_observations: number;
+      label: string;
+    };
+  };
+  anomalies: Array<{
+    id: string;
+    float_id: string;
+    cycle_number: number;
+    timestamp: string;
+    latitude: number;
+    longitude: number;
+    depth_m: number;
+    variable: string;
+    observed_value: string;
+    baseline_mean: string;
+    deviation: string;
+    z_score: number;
+    is_anomaly: boolean;
+    region: string;
+    source_file: string;
+  }>;
+  notable_observations: Array<{
+    date: string;
+    float_id: string;
+    cycle: number;
+    location: string;
+    depth: string;
+    depth_num: number;
+    variable: string;
+    observation: string;
+    status: string;
+    is_anomaly: boolean;
+    z_score: number;
+    region: string;
+    source_file: string;
+  }>;
+  regional_summaries: Record<string, {
+    temp_pattern: string;
+    sal_pattern: string;
+    thermocline: string;
+    anomaly_count: number;
+    coverage: string;
+  }>;
+  trends?: Record<string, Record<string, Array<{
+    date: string;
+    val: number;
+    baseline: number;
+    isAnomaly: boolean;
+    unit: string;
+  }>>>;
+}
+
+/**
+  * 7. GET /api/v1/insights/summary
+  * Retrieves aggregated oceanographic metrics and anomalies for Ocean Insights dashboard.
+  */
+export async function getOceanInsightsSummary(params?: {
+  region?: string;
+  timeRange?: string;
+  depth?: string;
+  variable?: string;
+}): Promise<OceanInsightsSummaryResponse> {
+  const url = new URL(`${BACKEND_API_URL}/api/v1/insights/summary`);
+  if (params?.region) url.searchParams.set("region", params.region);
+  if (params?.timeRange) url.searchParams.set("time_range", params.timeRange);
+  if (params?.depth) url.searchParams.set("depth", params.depth);
+  if (params?.variable) url.searchParams.set("variable", params.variable);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const searchPath = `/api/v1/insights/summary?${url.searchParams.toString()}`;
+    const res = await safeFetch(searchPath, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch insights summary (HTTP ${res.status}): ${res.statusText}`);
+    }
+
+    const data: OceanInsightsSummaryResponse = await res.json();
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error("Insights summary request timed out.");
+    }
+    throw err;
+  }
 /**
  * 7. GET /api/visualizations/regions
  */

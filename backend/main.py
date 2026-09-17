@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api.health import router as health_router
 from backend.app.api.query_router import router as query_router
 from backend.app.api.visualization_router import router as visualization_router
+from backend.app.api.insights_router import router as insights_router
 
 app = FastAPI(
     title="FloatChat Ocean Intelligence API",
@@ -23,6 +24,7 @@ allowed_origins = [
     "http://127.0.0.1:8000",
     "http://192.168.0.8:3000",
     "http://192.168.0.8:8000",
+    "*",
 ]
 
 env_origins = os.getenv("CORS_ORIGINS", os.getenv("ALLOWED_ORIGINS", ""))
@@ -41,6 +43,7 @@ app.add_middleware(
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(query_router, prefix="/api/v1")
 app.include_router(visualization_router, prefix="/api/v1")
+app.include_router(insights_router, prefix="/api/v1")
 
 # Also mount on /api for direct /api/visualizations/... and /api/query access
 app.include_router(health_router, prefix="/api")
