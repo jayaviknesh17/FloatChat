@@ -121,6 +121,7 @@ class QueryResponse(BaseModel):
 
     query: QueryTransparency
     count: int = Field(..., description="Number of observation records returned")
+    total_matching_count: Optional[int] = Field(None, description="Total matching observation records in database matching filters before sample limit")
     results: List[Dict[str, Any]] = Field(..., description="List of matching observation records")
     sqlite_db_latency_ms: float = Field(..., description="Internal SQLite database query execution latency in milliseconds")
     latency_ms: float = Field(..., description="Total backend endpoint processing latency in milliseconds")
@@ -201,6 +202,7 @@ class NLExecutionResponse(BaseModel):
     status: str = Field(..., description="Status: 'success', 'conversational', 'clarification_needed', or 'error'")
     interpreted_query: Optional[Dict[str, Any]] = Field(None, description="Validated QueryRequest dictionary if status is 'success'")
     count: int = Field(0, description="Number of matching observation records returned")
+    total_matching_count: Optional[int] = Field(None, description="Total matching observation records in database matching filters before sample limit")
     float_count: int = Field(0, description="Number of unique float platform numbers returned")
     date_range: Dict[str, Optional[str]] = Field(default_factory=dict, description="Temporal range of results {start, end}")
     geographic_bounds: Dict[str, Optional[float]] = Field(default_factory=dict, description="Spatial bounding box {lat_min, lat_max, lon_min, lon_max}")

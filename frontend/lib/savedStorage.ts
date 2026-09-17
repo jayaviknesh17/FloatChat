@@ -46,13 +46,13 @@ export const EXAMPLE_QUERIES: SavedQuery[] = [
   {
     id: "demo_3",
     title: "Thermocline Depth Analysis",
-    queryText: "Where is the thermocline depth in the Bay of Bengal during summer 2025?",
+    queryText: "Where is the thermocline depth in the Bay of Bengal during summer 2021?",
     category: "Temperature",
     tags: ["Bay of Bengal", "Thermocline", "Example"],
     region: "Bay of Bengal",
     variable: "Thermocline",
     depth: "0-500m",
-    period: "Summer 2025",
+    period: "Summer 2021",
     analysis: "Vertical Temperature Gradient (|dT/dz| max)",
     savedAt: new Date().toISOString(),
     thumbnailType: "thermocline-depth",
@@ -70,14 +70,29 @@ export const EXAMPLE_QUERIES: SavedQuery[] = [
     depth: "0-2000m",
     period: "Last 12 Months",
     analysis: "4D Geostrophic & Deep Drift Path",
-    savedAt: new Date().toISOString(),
+    savedAt: new Date(Date.now() - 3600000 * 24).toISOString(),
     thumbnailType: "float-trajectory",
     summary: "Example trajectory query for active ARGO float platform.",
+  },
+  {
+    id: "demo_5",
+    title: "Marine Heatwave Anomalies",
+    queryText: "Identify marine heatwaves and thermal anomalies in the Arabian Sea upper 200m.",
+    category: "Anomalies",
+    tags: ["Arabian Sea", "Heatwave", "Anomalies", "Example"],
+    region: "Arabian Sea",
+    variable: "Marine Heatwaves",
+    depth: "0-200m",
+    period: "Last 30 Days",
+    analysis: "Extreme Thermal Anomaly Baseline Check",
+    savedAt: new Date(Date.now() - 3600000 * 48).toISOString(),
+    thumbnailType: "marine-heatwaves",
+    summary: "Example query for marine heatwaves and thermal anomaly detection.",
   },
 ];
 
 // ==========================================
-// SAVED QUERIES
+// SAVED QUERIES (USER SAVED STORAGE)
 // ==========================================
 
 export function getSavedQueries(): SavedQuery[] {
@@ -86,25 +101,20 @@ export function getSavedQueries(): SavedQuery[] {
     const raw = localStorage.getItem(SAVED_QUERIES_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Filter out built-in example queries if legacy code seeded them into localStorage
+    return parsed.filter(
+      (q: any) =>
+        q &&
+        typeof q === "object" &&
+        !q.id?.startsWith("demo_") &&
+        !q.tags?.includes("Example")
+    );
   } catch (err) {
     console.error("Error reading saved queries from localStorage:", err);
     return [];
   }
 }
-
-export function loadExampleQueries(): void {
-  if (typeof window !== "undefined") {
-    try {
-      localStorage.setItem(SAVED_QUERIES_KEY, JSON.stringify(EXAMPLE_QUERIES));
-      dispatchStorageEvent();
-    } catch (err) {
-      console.error("Error loading example queries:", err);
-    }
-  }
-}
-
-
 
 export function saveQuery(queryData: Omit<SavedQuery, "id" | "savedAt">): SavedQuery {
   const existing = getSavedQueries();
@@ -187,6 +197,31 @@ export function saveQuery(queryData: Omit<SavedQuery, "id" | "savedAt">): SavedQ
   return newSavedQuery;
 }
 
+export function updateSavedQuery(id: string, updatedFields: Partial<SavedQuery>): SavedQuery | null {
+  const existing = getSavedQueries();
+  const index = existing.findIndex((q) => q.id === id);
+  if (index === -1) return null;
+
+  const updatedQuery: SavedQuery = {
+    ...existing[index],
+    ...updatedFields,
+    id, // Preserve ID
+  };
+
+  const updated = [...existing];
+  updated[index] = updatedQuery;
+
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(SAVED_QUERIES_KEY, JSON.stringify(updated));
+      dispatchStorageEvent();
+    } catch (err) {
+      console.error("Error updating saved query in localStorage:", err);
+    }
+  }
+
+  return updatedQuery;
+}
 
 export function deleteSavedQuery(id: string): void {
   const existing = getSavedQueries();

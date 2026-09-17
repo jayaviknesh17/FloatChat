@@ -54,6 +54,7 @@ export default function Home() {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const urlQuery = params.get("q");
+      const isEdit = params.get("edit") === "1";
       const sessionQuery = sessionStorage.getItem("floatchat_pending_query");
       const targetQuery = urlQuery || sessionQuery;
 
@@ -61,9 +62,14 @@ export default function Home() {
         sessionStorage.removeItem("floatchat_pending_query");
         // Clear url query without full reload
         window.history.replaceState({}, document.title, window.location.pathname);
-        setTimeout(() => {
-          handleSendMessage(decodeURIComponent(targetQuery));
-        }, 150);
+        const decodedQuery = decodeURIComponent(targetQuery);
+        if (isEdit) {
+          setComposerInitialQuery(decodedQuery);
+        } else {
+          setTimeout(() => {
+            handleSendMessage(decodedQuery);
+          }, 150);
+        }
       }
     }
   }, []);
@@ -118,8 +124,69 @@ export default function Home() {
       };
 
       setMessages((prev) => [...prev, botMessage]);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Query execution error:", err);
+      const errorMessageId = `bot_err_${Date.now()}`;
+      const errorMessageText = err?.message || "An error occurred while executing the query. Please try submitting again.";
+      const errorMessage: ChatMessage = {
+        id: errorMessageId,
+        sender: "floatchat",
+        result: {
+          queryId: `err_${Date.now()}`,
+          queryText: queryText,
+          understood: {
+            originalQuery: queryText,
+            region: "Global Ocean",
+            variable: "Temperature & Salinity",
+            depth: "0–2000m",
+            period: "All Observation Cycles",
+            analysis: "Error",
+          },
+          summary: `Unable to complete query execution: ${errorMessageText}`,
+          keyValues: [],
+          interpretation: ["Query execution encountered a network or backend error."],
+          visualizationType: "none",
+          matchedFloats: [],
+          provenance: {
+            floatId: "Array",
+            cycle: 1,
+            date: new Date().toISOString(),
+            location: "Global Ocean",
+            depth: "0–2000m",
+            source: "Real ARGO NetCDF (*.nc) via SQLite",
+            dac: "ARGO GDAC",
+            qcStatus: "Error",
+          },
+          timestamp: new Date().toISOString(),
+          nlResponse: {
+            original_query: queryText,
+            status: "error",
+            count: 0,
+            float_count: 0,
+            date_range: {},
+            geographic_bounds: {},
+            variables: [],
+            results: [],
+            provenance: {
+              data_source: "Real ARGO GDAC Core Profiles",
+              source_type: "Real ARGO NetCDF (*.nc) via SQLite",
+              float_ids: [],
+              cycle_numbers: [],
+              variables: [],
+              date_range: { start: null, end: null },
+              processing_qc_notes: "Execution error or request timeout.",
+            },
+            sqlite_db_latency_ms: 0,
+            total_latency_ms: 0,
+            clarification: errorMessageText,
+            confidence: 0,
+            conversational_response: `I encountered an issue processing your query: ${errorMessageText}. Please check backend server connectivity and try again.`,
+            response_language: "en",
+          },
+        },
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
       setComposerInitialQuery("");

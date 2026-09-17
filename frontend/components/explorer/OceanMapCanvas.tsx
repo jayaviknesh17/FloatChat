@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Plus, Minus, Crosshair, Layers, Compass, Loader2, Globe, Maximize2 } from "lucide-react";
 import { FloatSummaryItem, ArgoFloat, OceanRegion, OceanVariable, TrajectoryPoint } from "@/lib/types";
+import { getFloatMarkerColor } from "@/lib/depthColor";
 import { WORLD_LANDMASSES, GLOBAL_OCEAN_LABELS } from "@/lib/worldLandmasses";
 
 interface OceanMapCanvasProps {
@@ -343,14 +344,16 @@ export default function OceanMapCanvas({
         const isSelected = selectedId === fid;
         const isHovered = hoveredId === fid;
 
+        const hexColor = getFloatMarkerColor(f);
+
         // Selected Float Pulsing Ring
         if (isSelected) {
           const pulseRadius = 12 + Math.sin(tick * 3.5) * 3.5;
           ctx.beginPath();
           ctx.arc(fx, fy, pulseRadius, 0, Math.PI * 2);
-          ctx.strokeStyle = "#22d3ee";
+          ctx.strokeStyle = "#ffffff";
           ctx.lineWidth = 2;
-          ctx.shadowColor = "rgba(34, 211, 238, 0.9)";
+          ctx.shadowColor = hexColor;
           ctx.shadowBlur = 14;
           ctx.stroke();
           ctx.shadowBlur = 0;
@@ -360,18 +363,16 @@ export default function OceanMapCanvas({
         const glowRadius = isHovered ? 9 : 6.5;
         ctx.beginPath();
         ctx.arc(fx, fy, glowRadius, 0, Math.PI * 2);
-        ctx.fillStyle = isSelected
-          ? "rgba(34, 211, 238, 0.75)"
-          : isHovered
-          ? "rgba(56, 189, 248, 0.85)"
-          : "rgba(56, 189, 248, 0.55)";
+        ctx.fillStyle = hexColor;
+        ctx.globalAlpha = isSelected ? 0.75 : 0.45;
         ctx.fill();
+        ctx.globalAlpha = 1.0;
 
         // Float Center Dot
         ctx.beginPath();
         ctx.arc(fx, fy, isHovered ? 4.5 : 3, 0, Math.PI * 2);
-        ctx.fillStyle = isSelected ? "#ffffff" : "#38bdf8";
-        ctx.shadowColor = "#38bdf8";
+        ctx.fillStyle = hexColor;
+        ctx.shadowColor = hexColor;
         ctx.shadowBlur = 8;
         ctx.fill();
         ctx.shadowBlur = 0;

@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from "react";
 import * as THREE from "three";
 import { FloatSummaryItem, ArgoFloat, OceanRegion, TrajectoryPoint } from "@/lib/types";
+import { getFloatMarkerColor, normalizeFloatDepth } from "@/lib/depthColor";
 import {
   Plus,
   Minus,
@@ -38,50 +39,167 @@ interface GeoLabel {
   maxDist: number;
 }
 
-const REGION_COORDINATES: Record<string, { lat: number; lon: number }> = {
-  "Global Ocean": { lat: 10, lon: 75 },
-  "Indian Ocean": { lat: -5, lon: 75 },
-  "Bay of Bengal": { lat: 14, lon: 88 },
-  "Arabian Sea": { lat: 15, lon: 64 },
-  "South China Sea": { lat: 14, lon: 114 },
-  "Western Pacific": { lat: 10, lon: 135 },
-  "Eastern Pacific": { lat: 0, lon: -110 },
-  "Western Atlantic": { lat: 25, lon: -70 },
-  "Eastern Atlantic": { lat: 15, lon: -25 },
-  "Southern Ocean": { lat: -55, lon: 75 },
-  "Arctic Ocean": { lat: 75, lon: 0 },
-  "Mediterranean Sea": { lat: 35, lon: 18 },
+const REGION_COORDINATES: Record<string, { lat: number; lon: number; dist?: number }> = {
+  "Global Ocean": { lat: 10, lon: 75, dist: 42 },
+  "global_ocean": { lat: 10, lon: 75, dist: 42 },
+  "Indian Ocean": { lat: -10, lon: 75, dist: 36 },
+  "indian_ocean": { lat: -10, lon: 75, dist: 36 },
+  "Bay of Bengal": { lat: 14, lon: 88, dist: 32 },
+  "bay_of_bengal": { lat: 14, lon: 88, dist: 32 },
+  "Arabian Sea": { lat: 15, lon: 64, dist: 32 },
+  "arabian_sea": { lat: 15, lon: 64, dist: 32 },
+  "South China Sea": { lat: 16, lon: 114, dist: 32 },
+  "south_china_sea": { lat: 16, lon: 114, dist: 32 },
+  "Western Pacific": { lat: 25, lon: 145, dist: 34 },
+  "western_pacific": { lat: 25, lon: 145, dist: 34 },
+  "Eastern Pacific": { lat: 12, lon: -110, dist: 36 },
+  "eastern_pacific": { lat: 12, lon: -110, dist: 36 },
+  "Western Atlantic": { lat: 26, lon: -65, dist: 34 },
+  "western_atlantic": { lat: 26, lon: -65, dist: 34 },
+  "Eastern Atlantic": { lat: -25, lon: 45, dist: 36 },
+  "eastern_atlantic": { lat: -25, lon: 45, dist: 36 },
+  "Southern Ocean": { lat: -55, lon: 95, dist: 36 },
+  "southern_ocean": { lat: -55, lon: 95, dist: 36 },
+  "Arctic Ocean": { lat: 72, lon: -15, dist: 36 },
+  "arctic_ocean": { lat: 72, lon: -15, dist: 36 },
+  "Mediterranean Sea": { lat: 38, lon: 10, dist: 32 },
+  "mediterranean_sea": { lat: 38, lon: 10, dist: 32 },
 };
 
 const GLOBE_LABELS: GeoLabel[] = [
-  // Major Oceans (Visible at all zoom levels up to maxDist 65)
-  { name: "INDIAN OCEAN", lat: -10, lon: 78, type: "ocean", maxDist: 65 },
-  { name: "PACIFIC OCEAN", lat: 0, lon: 165, type: "ocean", maxDist: 65 },
-  { name: "ATLANTIC OCEAN", lat: 0, lon: -30, type: "ocean", maxDist: 65 },
-  { name: "SOUTHERN OCEAN", lat: -60, lon: 75, type: "ocean", maxDist: 65 },
+  // ==================== OCEANS (Visible at all zoom levels) ====================
+  { name: "INDIAN OCEAN", lat: -10, lon: 78, type: "ocean", maxDist: 70 },
+  { name: "PACIFIC OCEAN", lat: 0, lon: 165, type: "ocean", maxDist: 70 },
+  { name: "ATLANTIC OCEAN", lat: 5, lon: -30, type: "ocean", maxDist: 70 },
+  { name: "SOUTHERN OCEAN", lat: -60, lon: 75, type: "ocean", maxDist: 70 },
+  { name: "ARCTIC OCEAN", lat: 82, lon: 0, type: "ocean", maxDist: 70 },
 
-  // Continents (Visible up to maxDist 65)
-  { name: "ASIA", lat: 38, lon: 95, type: "continent", maxDist: 65 },
-  { name: "AFRICA", lat: 5, lon: 22, type: "continent", maxDist: 65 },
-  { name: "EUROPE", lat: 50, lon: 15, type: "continent", maxDist: 65 },
-  { name: "AUSTRALIA", lat: -25, lon: 134, type: "continent", maxDist: 65 },
+  // ==================== CONTINENTS (Visible at all zoom levels) ====================
+  { name: "ASIA", lat: 38, lon: 95, type: "continent", maxDist: 70 },
+  { name: "AFRICA", lat: 5, lon: 22, type: "continent", maxDist: 70 },
+  { name: "EUROPE", lat: 50, lon: 15, type: "continent", maxDist: 70 },
+  { name: "NORTH AMERICA", lat: 45, lon: -100, type: "continent", maxDist: 70 },
+  { name: "SOUTH AMERICA", lat: -15, lon: -60, type: "continent", maxDist: 70 },
+  { name: "AUSTRALIA", lat: -25, lon: 134, type: "continent", maxDist: 70 },
+  { name: "ANTARCTICA", lat: -80, lon: 0, type: "continent", maxDist: 70 },
 
-  // Major Countries & Seas (Visible at medium zoom <= 52)
-  { name: "INDIA", lat: 20.5, lon: 78.9, type: "country", maxDist: 52 },
-  { name: "CHINA", lat: 35.8, lon: 104.1, type: "country", maxDist: 52 },
-  { name: "SAUDI ARABIA", lat: 23.8, lon: 45.0, type: "country", maxDist: 52 },
-  { name: "BAY OF BENGAL", lat: 14.0, lon: 88.0, type: "sea", maxDist: 52 },
-  { name: "ARABIAN SEA", lat: 15.0, lon: 64.0, type: "sea", maxDist: 52 },
+  // ==================== MAJOR SEAS & GULFS ====================
+  { name: "MEDITERRANEAN SEA", lat: 35.0, lon: 18.0, type: "sea", maxDist: 55 },
+  { name: "CARIBBEAN SEA", lat: 15.0, lon: -75.0, type: "sea", maxDist: 55 },
+  { name: "SOUTH CHINA SEA", lat: 14.0, lon: 114.0, type: "sea", maxDist: 55 },
+  { name: "ARABIAN SEA", lat: 15.0, lon: 64.0, type: "sea", maxDist: 55 },
+  { name: "BAY OF BENGAL", lat: 14.0, lon: 88.0, type: "sea", maxDist: 55 },
+  { name: "RED SEA", lat: 20.0, lon: 38.0, type: "sea", maxDist: 50 },
+  { name: "GULF OF MEXICO", lat: 25.0, lon: -90.0, type: "sea", maxDist: 52 },
+  { name: "CORAL SEA", lat: -18.0, lon: 155.0, type: "sea", maxDist: 52 },
+  { name: "BERING SEA", lat: 58.0, lon: -175.0, type: "sea", maxDist: 52 },
+  { name: "BALTIC SEA", lat: 58.0, lon: 20.0, type: "sea", maxDist: 48 },
+  { name: "BLACK SEA", lat: 43.0, lon: 35.0, type: "sea", maxDist: 48 },
+  { name: "NORWEGIAN SEA", lat: 68.0, lon: 5.0, type: "sea", maxDist: 52 },
+  { name: "TASMAN SEA", lat: -38.0, lon: 160.0, type: "sea", maxDist: 50 },
+  { name: "LABRADOR SEA", lat: 58.0, lon: -55.0, type: "sea", maxDist: 50 },
 
-  // Regional Countries & Seas (Visible at close zoom <= 42)
-  { name: "Sri Lanka", lat: 7.8, lon: 80.7, type: "country", maxDist: 42 },
-  { name: "Bangladesh", lat: 23.8, lon: 90.3, type: "country", maxDist: 42 },
-  { name: "Myanmar", lat: 19.8, lon: 96.1, type: "country", maxDist: 42 },
-  { name: "Pakistan", lat: 30.3, lon: 69.3, type: "country", maxDist: 42 },
-  { name: "Oman", lat: 21.5, lon: 57.0, type: "country", maxDist: 42 },
-  { name: "Indonesia", lat: -0.78, lon: 113.9, type: "country", maxDist: 42 },
-  { name: "South China Sea", lat: 14.0, lon: 114.0, type: "sea", maxDist: 42 },
-  { name: "Madagascar", lat: -18.7, lon: 46.8, type: "country", maxDist: 42 },
+  // ==================== AFRICA COUNTRIES ====================
+  { name: "NIGERIA", lat: 9.08, lon: 8.68, type: "country", maxDist: 58 },
+  { name: "SOUTH AFRICA", lat: -30.56, lon: 22.94, type: "country", maxDist: 58 },
+  { name: "EGYPT", lat: 26.82, lon: 30.80, type: "country", maxDist: 58 },
+  { name: "ALGERIA", lat: 28.03, lon: 1.66, type: "country", maxDist: 58 },
+  { name: "KENYA", lat: -1.29, lon: 36.82, type: "country", maxDist: 58 },
+  { name: "ETHIOPIA", lat: 9.15, lon: 40.49, type: "country", maxDist: 58 },
+  { name: "DR CONGO", lat: -4.03, lon: 21.76, type: "country", maxDist: 58 },
+  { name: "Morocco", lat: 31.79, lon: -7.09, type: "country", maxDist: 46 },
+  { name: "Tanzania", lat: -6.37, lon: 34.89, type: "country", maxDist: 46 },
+  { name: "Angola", lat: -11.20, lon: 17.87, type: "country", maxDist: 46 },
+  { name: "Sudan", lat: 12.86, lon: 30.22, type: "country", maxDist: 46 },
+  { name: "Ghana", lat: 7.95, lon: -1.03, type: "country", maxDist: 46 },
+  { name: "Madagascar", lat: -18.77, lon: 46.87, type: "country", maxDist: 46 },
+  { name: "Mozambique", lat: -18.67, lon: 35.53, type: "country", maxDist: 46 },
+  { name: "Cameroon", lat: 7.37, lon: 12.35, type: "country", maxDist: 46 },
+  { name: "Senegal", lat: 14.50, lon: -14.45, type: "country", maxDist: 46 },
+  { name: "Tunisia", lat: 33.88, lon: 9.53, type: "country", maxDist: 46 },
+  { name: "Somalia", lat: 5.15, lon: 46.20, type: "country", maxDist: 46 },
+  { name: "Libya", lat: 26.33, lon: 17.23, type: "country", maxDist: 46 },
+  { name: "Zambia", lat: -13.13, lon: 27.85, type: "country", maxDist: 46 },
+  { name: "Ivory Coast", lat: 7.54, lon: -5.55, type: "country", maxDist: 46 },
+  { name: "Zimbabwe", lat: -19.01, lon: 29.15, type: "country", maxDist: 46 },
+
+  // ==================== SOUTH AMERICA COUNTRIES ====================
+  { name: "BRAZIL", lat: -14.24, lon: -51.92, type: "country", maxDist: 58 },
+  { name: "ARGENTINA", lat: -38.41, lon: -63.61, type: "country", maxDist: 58 },
+  { name: "COLOMBIA", lat: 4.57, lon: -74.30, type: "country", maxDist: 58 },
+  { name: "PERU", lat: -9.19, lon: -75.01, type: "country", maxDist: 58 },
+  { name: "CHILE", lat: -35.67, lon: -71.54, type: "country", maxDist: 58 },
+  { name: "Venezuela", lat: 6.42, lon: -66.59, type: "country", maxDist: 46 },
+  { name: "Ecuador", lat: -1.83, lon: -78.18, type: "country", maxDist: 46 },
+  { name: "Bolivia", lat: -16.29, lon: -63.58, type: "country", maxDist: 46 },
+  { name: "Paraguay", lat: -23.44, lon: -58.44, type: "country", maxDist: 46 },
+  { name: "Uruguay", lat: -32.52, lon: -55.76, type: "country", maxDist: 46 },
+  { name: "Guyana", lat: 4.86, lon: -58.93, type: "country", maxDist: 46 },
+
+  // ==================== NORTH AMERICA & CENTRAL AMERICA COUNTRIES ====================
+  { name: "UNITED STATES", lat: 37.09, lon: -95.71, type: "country", maxDist: 58 },
+  { name: "CANADA", lat: 56.13, lon: -106.35, type: "country", maxDist: 58 },
+  { name: "MEXICO", lat: 23.63, lon: -102.55, type: "country", maxDist: 58 },
+  { name: "Cuba", lat: 21.52, lon: -77.78, type: "country", maxDist: 46 },
+  { name: "Jamaica", lat: 18.11, lon: -77.30, type: "country", maxDist: 46 },
+  { name: "Guatemala", lat: 15.78, lon: -90.23, type: "country", maxDist: 46 },
+  { name: "Costa Rica", lat: 9.74, lon: -83.75, type: "country", maxDist: 46 },
+  { name: "Panama", lat: 8.53, lon: -80.78, type: "country", maxDist: 46 },
+  { name: "Dominican Rep.", lat: 18.73, lon: -70.16, type: "country", maxDist: 46 },
+  { name: "Greenland", lat: 71.70, lon: -42.60, type: "country", maxDist: 46 },
+
+  // ==================== EUROPE COUNTRIES ====================
+  { name: "UNITED KINGDOM", lat: 55.37, lon: -3.43, type: "country", maxDist: 58 },
+  { name: "FRANCE", lat: 46.22, lon: 2.21, type: "country", maxDist: 58 },
+  { name: "GERMANY", lat: 51.16, lon: 10.45, type: "country", maxDist: 58 },
+  { name: "SPAIN", lat: 40.46, lon: -3.74, type: "country", maxDist: 58 },
+  { name: "ITALY", lat: 41.87, lon: 12.56, type: "country", maxDist: 58 },
+  { name: "NORWAY", lat: 60.47, lon: 8.46, type: "country", maxDist: 58 },
+  { name: "TURKEY", lat: 38.96, lon: 35.24, type: "country", maxDist: 58 },
+  { name: "Sweden", lat: 60.12, lon: 18.64, type: "country", maxDist: 46 },
+  { name: "Poland", lat: 51.91, lon: 19.14, type: "country", maxDist: 46 },
+  { name: "Ukraine", lat: 48.37, lon: 31.16, type: "country", maxDist: 46 },
+  { name: "Greece", lat: 39.07, lon: 21.82, type: "country", maxDist: 46 },
+  { name: "Portugal", lat: 39.40, lon: -8.22, type: "country", maxDist: 46 },
+  { name: "Ireland", lat: 53.14, lon: -7.69, type: "country", maxDist: 46 },
+  { name: "Netherlands", lat: 52.13, lon: 5.29, type: "country", maxDist: 46 },
+  { name: "Finland", lat: 61.92, lon: 25.74, type: "country", maxDist: 46 },
+  { name: "Iceland", lat: 64.96, lon: -19.02, type: "country", maxDist: 46 },
+  { name: "Romania", lat: 45.94, lon: 24.96, type: "country", maxDist: 46 },
+  { name: "Switzerland", lat: 46.81, lon: 8.22, type: "country", maxDist: 46 },
+  { name: "Austria", lat: 47.51, lon: 14.55, type: "country", maxDist: 46 },
+
+  // ==================== ASIA COUNTRIES ====================
+  { name: "INDIA", lat: 20.59, lon: 78.96, type: "country", maxDist: 58 },
+  { name: "CHINA", lat: 35.86, lon: 104.19, type: "country", maxDist: 58 },
+  { name: "RUSSIA", lat: 61.52, lon: 105.31, type: "country", maxDist: 58 },
+  { name: "JAPAN", lat: 36.20, lon: 138.25, type: "country", maxDist: 58 },
+  { name: "SAUDI ARABIA", lat: 23.88, lon: 45.07, type: "country", maxDist: 58 },
+  { name: "INDONESIA", lat: -0.78, lon: 113.92, type: "country", maxDist: 58 },
+  { name: "PAKISTAN", lat: 30.37, lon: 69.34, type: "country", maxDist: 58 },
+  { name: "IRAN", lat: 32.42, lon: 53.68, type: "country", maxDist: 58 },
+  { name: "South Korea", lat: 35.90, lon: 127.76, type: "country", maxDist: 46 },
+  { name: "Vietnam", lat: 14.05, lon: 108.27, type: "country", maxDist: 46 },
+  { name: "Thailand", lat: 15.87, lon: 100.99, type: "country", maxDist: 46 },
+  { name: "Malaysia", lat: 4.21, lon: 101.97, type: "country", maxDist: 46 },
+  { name: "Philippines", lat: 12.87, lon: 121.77, type: "country", maxDist: 46 },
+  { name: "Myanmar", lat: 21.91, lon: 95.95, type: "country", maxDist: 46 },
+  { name: "Bangladesh", lat: 23.68, lon: 90.35, type: "country", maxDist: 46 },
+  { name: "Sri Lanka", lat: 7.87, lon: 80.77, type: "country", maxDist: 46 },
+  { name: "Iraq", lat: 33.22, lon: 43.67, type: "country", maxDist: 46 },
+  { name: "UAE", lat: 23.42, lon: 53.84, type: "country", maxDist: 46 },
+  { name: "Oman", lat: 21.51, lon: 55.92, type: "country", maxDist: 46 },
+  { name: "Kazakhstan", lat: 48.01, lon: 66.92, type: "country", maxDist: 46 },
+  { name: "Uzbekistan", lat: 41.37, lon: 64.58, type: "country", maxDist: 46 },
+  { name: "Nepal", lat: 28.39, lon: 84.12, type: "country", maxDist: 46 },
+  { name: "Taiwan", lat: 23.69, lon: 120.96, type: "country", maxDist: 46 },
+
+  // ==================== OCEANIA & PACIFIC ====================
+  { name: "AUSTRALIA", lat: -25.27, lon: 133.77, type: "country", maxDist: 58 },
+  { name: "NEW ZEALAND", lat: -40.90, lon: 174.88, type: "country", maxDist: 58 },
+  { name: "Papua New Guinea", lat: -6.31, lon: 143.95, type: "country", maxDist: 46 },
+  { name: "Fiji", lat: -17.71, lon: 178.06, type: "country", maxDist: 46 },
+  { name: "Hawaii", lat: 19.89, lon: -155.58, type: "country", maxDist: 46 },
 ];
 
 function getFloatId(f: any): string {
@@ -97,7 +215,8 @@ function getFloatLon(f: any): number {
 }
 
 function getFloatDepth(f: any): number {
-  return f.max_depth || f.depth || 1000;
+  const norm = normalizeFloatDepth(f);
+  return norm !== null ? Math.round(norm) : 0;
 }
 
 // Convert Geographic (Lat, Lon) to 3D Sphere Vector3
@@ -112,15 +231,7 @@ function latLonToVector3(lat: number, lon: number, radius: number): THREE.Vector
   return new THREE.Vector3(x, y, z);
 }
 
-// Get marker color by float depth/variable
-function getFloatMarkerColor(floatItem: any): string {
-  if (floatItem.currentAnomaly?.isAnomalous) return "#FBBF24"; // Amber anomaly
-  const depth = getFloatDepth(floatItem);
-  if (depth <= 200) return "#22D3EE"; // 0-200m Bright cyan
-  if (depth <= 500) return "#38BDF8"; // 200-500m Ocean blue
-  if (depth <= 1000) return "#14B8A6"; // 500-1000m Deep teal
-  return "#FBBF24"; // 1000-2000m Warm amber/gold
-}
+
 
 const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
   ({ floats, selectedFloat, onSelectFloat, selectedRegion, selectedVariable, trajectories }, ref) => {
@@ -194,22 +305,26 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
       renderer.setSize(container.clientWidth, container.clientHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.35;
+      renderer.toneMappingExposure = 1.45;
       container.appendChild(renderer.domElement);
 
       // 2. Realistic & Vibrant Lighting Setup
-      const ambientLight = new THREE.AmbientLight(0x406585, 2.5);
+      const ambientLight = new THREE.AmbientLight(0x4a7378, 2.7);
       scene.add(ambientLight);
 
-      const mainSun = new THREE.DirectionalLight(0xfff5e6, 3.2);
+      const mainSun = new THREE.DirectionalLight(0xfffdf0, 3.4);
       mainSun.position.set(50, 30, 50);
       scene.add(mainSun);
 
-      const backLight = new THREE.DirectionalLight(0x0284c7, 1.4);
+      const sideFill = new THREE.DirectionalLight(0x14b8a6, 1.1);
+      sideFill.position.set(-40, 20, -40);
+      scene.add(sideFill);
+
+      const backLight = new THREE.DirectionalLight(0x0284c7, 1.5);
       backLight.position.set(-50, -20, -50);
       scene.add(backLight);
 
-      // 3. Genuine NASA Blue Marble Satellite Earth Mesh with Vibrant Emissive Lift
+      // 3. Genuine NASA Blue Marble Satellite Earth Mesh with Vibrant Natural Green & Blue Enhancement
       const textureLoader = new THREE.TextureLoader();
       const earthTexture = textureLoader.load("/assets/earth_blue_marble.jpg");
       const specularTexture = textureLoader.load("/assets/earth_specular.jpg");
@@ -217,11 +332,12 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
       const globeGeo = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 64);
       const globeMat = new THREE.MeshPhongMaterial({
         map: earthTexture,
+        color: new THREE.Color(0xdcf8e6), // Subtle green-tinted multiplier to enrich vegetation & forests naturally
         specularMap: specularTexture,
         specular: new THREE.Color(0x38bdf8),
-        shininess: 25,
-        emissive: new THREE.Color(0x0c2540),
-        emissiveIntensity: 0.38,
+        shininess: 28,
+        emissive: new THREE.Color(0x082b2e), // Deep emerald-teal shadow fill
+        emissiveIntensity: 0.32,
       });
       const globeMesh = new THREE.Mesh(globeGeo, globeMat);
       scene.add(globeMesh);
@@ -274,12 +390,32 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
 
       const markerObjects: { mesh: THREE.Group; floatData: any }[] = [];
 
-      // Filter floats by region
+      // Filter floats by region cleanly & robustly
       const visibleFloats = floats.filter((f) => {
-        if (selectedRegion !== "All" && selectedRegion !== "Indian Ocean" && f.region !== selectedRegion) {
-          return false;
+        if (
+          !selectedRegion ||
+          selectedRegion === "All" ||
+          selectedRegion === "Global Ocean" ||
+          selectedRegion === "global_ocean"
+        ) {
+          return true;
         }
-        return true;
+        const selNorm = selectedRegion.toLowerCase().replace(/_/g, " ").trim();
+        const fRegionNorm = (f.region || "").toLowerCase().replace(/_/g, " ").trim();
+
+        return (
+          fRegionNorm.includes(selNorm) ||
+          selNorm.includes(fRegionNorm) ||
+          (selNorm.includes("bengal") && fRegionNorm.includes("bengal")) ||
+          (selNorm.includes("arabian") && fRegionNorm.includes("arabian")) ||
+          (selNorm.includes("indian") && fRegionNorm.includes("indian")) ||
+          (selNorm.includes("southern") && fRegionNorm.includes("southern")) ||
+          (selNorm.includes("pacific") && fRegionNorm.includes("pacific")) ||
+          (selNorm.includes("atlantic") && fRegionNorm.includes("atlantic")) ||
+          (selNorm.includes("arctic") && fRegionNorm.includes("arctic")) ||
+          (selNorm.includes("mediterranean") && fRegionNorm.includes("mediterranean")) ||
+          (selNorm.includes("china") && fRegionNorm.includes("china"))
+        );
       });
 
       visibleFloats.forEach((f) => {
@@ -296,14 +432,17 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
         const hexColorStr = getFloatMarkerColor(f);
         const hexColor = parseInt(hexColorStr.replace("#", "0x"), 16);
 
-        // Core Marker Sphere (Clean 3D Sphere Geometry)
+        const resolvedDepth = normalizeFloatDepth(f);
+        console.log(`[Ocean3DCanvas] Float ID: ${getFloatId(f)}, resolved depth: ${resolvedDepth}, color: ${hexColorStr}`);
+
+        // Core Marker Sphere (Clean 3D Sphere Geometry) - always uses depth-based hexColor
         const pinRadius = isSelected ? 0.52 : 0.38;
         const pinGeo = new THREE.SphereGeometry(pinRadius, 16, 16);
-        const pinMat = new THREE.MeshBasicMaterial({ color: isSelected ? 0xffffff : hexColor });
+        const pinMat = new THREE.MeshBasicMaterial({ color: hexColor });
         const pinMesh = new THREE.Mesh(pinGeo, pinMat);
         floatGroup.add(pinMesh);
 
-        // Subtle Outer Glow Ring matching color
+        // Subtle Outer Glow Ring matching depth color
         const haloRadius = isSelected ? 0.85 : 0.62;
         const haloGeo = new THREE.RingGeometry(pinRadius * 1.15, haloRadius, 24);
         const haloMat = new THREE.MeshBasicMaterial({
@@ -315,11 +454,11 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
         const haloMesh = new THREE.Mesh(haloGeo, haloMat);
         floatGroup.add(haloMesh);
 
-        // Distinct Selection Outline Ring (Cyan/White)
+        // Distinct Selection Outline Ring
         if (isSelected) {
           const selectRingGeo = new THREE.RingGeometry(0.9, 1.25, 32);
           const selectRingMat = new THREE.MeshBasicMaterial({
-            color: 0x22d3ee,
+            color: 0xffffff,
             side: THREE.DoubleSide,
             transparent: true,
             opacity: 0.95,
@@ -328,11 +467,11 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
           floatGroup.add(selectRingMesh);
         }
 
-        // Vertical Laser Depth Probe Line into Earth
+        // Vertical Laser Depth Probe Line into Earth using depth color
         const probePoints = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -2.5)];
         const probeGeo = new THREE.BufferGeometry().setFromPoints(probePoints);
         const probeMat = new THREE.LineBasicMaterial({
-          color: isSelected ? 0x22d3ee : hexColor,
+          color: hexColor,
           opacity: 0.65,
           transparent: true,
         });
@@ -536,7 +675,7 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
 
             // Zoom-based distance check
             if (camDist > (label.maxDist || 70)) {
-              el.style.opacity = "0";
+              if (el.style.opacity !== "0") el.style.opacity = "0";
               return;
             }
 
@@ -547,11 +686,16 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
 
             // Hide labels on the back side of the Earth curve
             if (dot < 0.15) {
-              el.style.opacity = "0";
+              if (el.style.opacity !== "0") el.style.opacity = "0";
               return;
             }
 
             const proj = pos.clone().project(camera);
+            if (proj.z > 1 || proj.z < -1) {
+              if (el.style.opacity !== "0") el.style.opacity = "0";
+              return;
+            }
+
             const x = ((proj.x + 1) * container.clientWidth) / 2;
             const y = ((-proj.y + 1) * container.clientHeight) / 2;
 
@@ -561,8 +705,13 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
           });
         }
 
-        // Pulse float marker halos
+        // Pulse float marker halos & scale markers dynamically with camera distance
+        const currentCamDist = camera.position.length();
+        const dynamicMarkerScale = Math.max(0.48, Math.min(1.35, Math.pow(currentCamDist / 42.0, 0.85)));
+
         markerObjects.forEach((m, idx) => {
+          m.mesh.scale.set(dynamicMarkerScale, dynamicMarkerScale, dynamicMarkerScale);
+
           const halo = m.mesh.children[1] as THREE.Mesh;
           if (halo) {
             const scale = 1 + Math.sin(elapsed * 3 + idx) * 0.15;
@@ -613,14 +762,16 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
           {GLOBE_LABELS.map((label, i) => (
             <div
               key={i}
-              className={`absolute top-0 left-0 transition-opacity duration-150 whitespace-nowrap font-mono-sci uppercase tracking-wider font-bold select-none ${
+              className={`absolute top-0 left-0 transition-opacity duration-150 whitespace-nowrap font-mono-sci select-none pointer-events-none ${
                 label.type === "ocean"
-                  ? "text-[11px] text-cyan-200/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] italic tracking-widest"
+                  ? "text-[11px] text-cyan-200/90 font-bold uppercase italic tracking-widest drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]"
                   : label.type === "continent"
-                  ? "text-[12px] text-amber-200/90 drop-shadow-[0_1px_4px_rgba(0,0,0,0.95)] tracking-widest font-extrabold"
+                  ? "text-[12px] text-amber-200/90 font-extrabold uppercase tracking-widest drop-shadow-[0_1px_4px_rgba(0,0,0,0.95)]"
                   : label.type === "sea"
-                  ? "text-[10px] text-sky-300/85 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] italic"
-                  : "text-[10px] text-slate-100 drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]"
+                  ? "text-[10px] text-sky-300/85 font-bold uppercase italic tracking-wider drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]"
+                  : label.maxDist >= 55
+                  ? "text-[10.5px] text-slate-100 font-bold uppercase tracking-wider drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] bg-slate-950/40 px-1.5 py-0.5 rounded backdrop-blur-[1px] border border-slate-700/30"
+                  : "text-[9.5px] text-slate-200 font-medium tracking-normal drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)] bg-slate-950/35 px-1 py-0.5 rounded backdrop-blur-[1px] border border-slate-800/25"
               }`}
               style={{ opacity: 0 }}
             >
@@ -740,7 +891,10 @@ const Ocean3DCanvas = forwardRef<Ocean3DCanvasRef, Ocean3DCanvasProps>(
             }}
           >
             <div className="flex items-center gap-1.5 font-bold text-cyan-300 font-mono-sci">
-              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              <span
+                className="w-2 h-2 rounded-full animate-ping"
+                style={{ backgroundColor: getFloatMarkerColor(hoveredFloat) }}
+              />
               <span>WMO #{getFloatId(hoveredFloat)}</span>
             </div>
             <p className="text-slate-300 text-[11px]">Region: {hoveredFloat.region}</p>

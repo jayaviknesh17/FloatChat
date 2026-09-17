@@ -8,6 +8,7 @@ import FloatProfilePanel from "@/components/panels/FloatProfilePanel";
 import AllRegionsDrawer, { RegionEntry } from "@/components/panels/AllRegionsDrawer";
 import AboutModal from "@/components/modals/AboutModal";
 import SettingsModal from "@/components/modals/SettingsModal";
+import VariableInsightsPanel from "@/components/panels/VariableInsightsPanel";
 import {
   FloatSummaryItem,
   TrajectoryPoint,
@@ -16,8 +17,17 @@ import {
   SystemStatus,
   DataProvenance,
   RegionSummaryItem,
+  VariableSummaryResponse,
+  ProfileAnalysisResponse,
 } from "@/lib/types";
-import { getFloatVisualization, getTrajectory, getSystemStatus, getRegionSummaries } from "@/lib/api";
+import {
+  getFloatVisualization,
+  getTrajectory,
+  getSystemStatus,
+  getRegionSummaries,
+  getVariableSummary,
+  getFloatProfileAnalysis,
+} from "@/lib/api";
 import {
   Search,
   ChevronDown,
@@ -45,6 +55,8 @@ import {
 
 export default function ExplorerPage() {
   const globeRef = useRef<Ocean3DCanvasRef>(null);
+  const insightsPanelRef = useRef<HTMLDivElement>(null);
+  const isMountedRef = useRef<boolean>(false);
 
   const [status, setStatus] = useState<SystemStatus>({
     isConnected: false,
@@ -66,6 +78,22 @@ export default function ExplorerPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeVariable, setActiveVariable] = useState<OceanVariable | "All Variables">("All Variables");
+
+  // Handler for selecting variable with automatic smooth scrolling to insights panel
+  const handleSelectVariable = (variableLabel: OceanVariable | "All Variables", shouldScroll = true) => {
+    setActiveVariable(variableLabel);
+    if (shouldScroll && isMountedRef.current) {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          insightsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 60);
+      });
+    }
+  };
+
+  useEffect(() => {
+    isMountedRef.current = true;
+  }, []);
   const [selectedRegion, setSelectedRegion] = useState<OceanRegion | "All">("All");
   const [selectedFloat, setSelectedFloat] = useState<FloatSummaryItem | null>(null);
   const [selectedProvenance, setSelectedProvenance] = useState<DataProvenance | null>(null);
@@ -204,6 +232,9 @@ export default function ExplorerPage() {
     },
   ];
 
+  // Featured 4 Region Cards for Default Explorer View
+  const featuredRegionCards = regionCards.slice(0, 4);
+
   // Helper: Explore region action (filters region, rotates 3D globe camera, and activates trajectory paths)
   const handleExploreRegion = (regionName: string, regionType: OceanRegion | "All") => {
     setSelectedRegion(regionType);
@@ -315,6 +346,40 @@ export default function ExplorerPage() {
     }
   }, [activeVariable, selectedRegion, timeRange, showTrajectoriesOnGlobe]);
 
+  // Load variable summary metrics when activeVariable or selectedRegion changes
+  const [varSummary, setVarSummary] = useState<VariableSummaryResponse | null>(null);
+  const [isVarSummaryLoading, setIsVarSummaryLoading] = useState<boolean>(false);
+  const [varSummaryError, setVarSummaryError] = useState<string | null>(null);
+
+  // Load float profile analysis when float is selected
+  const [profileAnalysis, setProfileAnalysis] = useState<ProfileAnalysisResponse | null>(null);
+  const [isProfileLoading, setIsProfileLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsVarSummaryLoading(true);
+    setVarSummaryError(null);
+
+    getVariableSummary(activeVariable, selectedRegion)
+      .then((res) => setVarSummary(res))
+      .catch((err) => setVarSummaryError(err.message || "Unable to fetch variable summary"))
+      .finally(() => setIsVarSummaryLoading(false));
+  }, [activeVariable, selectedRegion]);
+
+  useEffect(() => {
+    if (!selectedFloat) {
+      setProfileAnalysis(null);
+      return;
+    }
+    const fid = ("float_id" in selectedFloat ? selectedFloat.float_id : (selectedFloat as any).id) || "";
+    if (!fid) return;
+
+    setIsProfileLoading(true);
+    getFloatProfileAnalysis(fid)
+      .then((data) => setProfileAnalysis(data))
+      .catch(() => setProfileAnalysis(null))
+      .finally(() => setIsProfileLoading(false));
+  }, [selectedFloat]);
+
   // Intelligent Search & Filter Handling
   const handleSearchChange = (queryStr: string) => {
     setSearchQuery(queryStr);
@@ -388,11 +453,13 @@ export default function ExplorerPage() {
         recentQueries={[]}
         onSelectRecentQuery={() => {}}
         onSelectFeaturedQuery={(variableName) => {
-          if (variableName === "Temperature") setActiveVariable("Temperature");
-          else if (variableName === "Salinity") setActiveVariable("Salinity");
-          else if (variableName === "Marine Heatwaves") setActiveVariable("Marine Heatwaves");
-          else if (variableName === "Thermocline") setActiveVariable("Thermocline");
-          else if (variableName === "Float Trajectories") setActiveVariable("Float Trajectories");
+          if (
+            ["Temperature", "Salinity", "Marine Heatwaves", "Thermocline", "Float Trajectories", "All Variables"].includes(
+              variableName
+            )
+          ) {
+            handleSelectVariable(variableName as any);
+          }
         }}
         onNewChat={() => {
           window.location.href = "/";
@@ -500,7 +567,7 @@ export default function ExplorerPage() {
                 return (
                   <button
                     key={item.label}
-                    onClick={() => setActiveVariable(item.label as any)}
+                    onClick={() => handleSelectVariable(item.label as any)}
                     className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all backdrop-blur-md focus:outline-none focus:ring-2 focus:ring-cyan-400/40 ${
                       isActive
                         ? "bg-[#0284c7] text-white border border-cyan-400/50 shadow-[0_0_15px_rgba(2,132,199,0.4)]"
@@ -766,6 +833,35 @@ export default function ExplorerPage() {
             </div>
           </div>
 
+          {/* Scientific Variable Insights Panel */}
+          <div ref={insightsPanelRef} className="scroll-mt-6">
+            <VariableInsightsPanel
+              activeVariable={activeVariable}
+              summary={varSummary}
+              isLoading={isVarSummaryLoading}
+              error={varSummaryError}
+              selectedFloat={selectedFloat}
+              selectedRegion={selectedRegion}
+              onSelectFloat={(f) => setSelectedFloat(f)}
+              floats={filteredFloats.length > 0 ? filteredFloats : floats}
+              profileAnalysis={profileAnalysis}
+              isProfileLoading={isProfileLoading}
+              onRetry={() => {
+                setIsVarSummaryLoading(true);
+                setVarSummaryError(null);
+                getVariableSummary(activeVariable, selectedRegion)
+                  .then((res) => setVarSummary(res))
+                  .catch((err) => setVarSummaryError(err.message || "Unable to fetch variable summary"))
+                  .finally(() => setIsVarSummaryLoading(false));
+              }}
+              onOpenProfileDrawer={() => {
+                if (selectedFloat) {
+                  // Smooth drawer opening if needed
+                }
+              }}
+            />
+          </div>
+
           {/* Bottom Section: Explore by Region */}
           <div className="pt-2 pb-8 space-y-3">
             <div className="flex items-center justify-between">
@@ -786,9 +882,9 @@ export default function ExplorerPage() {
               </button>
             </div>
 
-            {/* Complete 12 Region Grid (6 cols on XL, 3 cols on MD, 2 on SM) */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              {regionCards.map((rc) => {
+            {/* Default View: 4 Featured Region Cards Grid (4 cols on LG, 2 on SM, 1 on Mobile) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {featuredRegionCards.map((rc) => {
                 const isSelected = selectedRegion === rc.region || selectedRegion === rc.title;
                 return (
                   <div

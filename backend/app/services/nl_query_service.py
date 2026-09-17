@@ -5,6 +5,7 @@ Translates natural-language oceanographic questions into validated QueryRequest 
 
 import re
 import json
+import sqlite3
 import ssl
 import certifi
 import urllib.request
@@ -190,8 +191,8 @@ class NLQueryService:
             current_region = "arabian_sea"
 
         current_variable = None
-        has_temp = any(v in lower for v in ["temperature", "temp", "°c", "வெப்பநிலை", "तापमान"])
-        has_psal = any(v in lower for v in ["salinity", "psal", "psu", "உவர்ப்பு", "लवणता"])
+        has_temp = any(v in lower for v in ["temperature", "temp", "°c", "வெப்பநிலை", "तापमान", "thermocline"])
+        has_psal = any(v in lower for v in ["salinity", "psal", "psu", "உவர்ப்பு", "लवणता", "halocline"])
         if has_temp and has_psal:
             current_variable = "both"
         elif has_temp:
@@ -328,6 +329,11 @@ class NLQueryService:
             return resolved_text, ctx.topic
         return query_text, None
 
+    def execute_nl_query(self, query_text: str, history: Optional[List[Dict[str, str]]] = None) -> Any:
+        """Compatibility wrapper delegating to QueryService.execute_nl_query."""
+        from backend.app.services.query_service import QueryService
+        return QueryService().execute_nl_query(query_text, history=history)
+
     def parse_query(self, query_text: str, history: Optional[List[Dict[str, str]]] = None) -> NLQueryOutput:
         """
         Main entry point for parsing natural language query.
@@ -449,10 +455,35 @@ class NLQueryService:
 
         return self._validate_and_build_output(ctx.original_query, merged_params, lang)
 
+    def get_latest_observation_date(self, float_id: Optional[str] = None, region: Optional[str] = None) -> datetime:
+        """
+        Dynamically query SQLite DB for the latest observation date for a float, region, or dataset.
+        Returns datetime object anchored to actual dataset contents.
+        """
+        try:
+            db_path = getattr(settings, "DB_PATH", "data/processed/argo_observations.db")
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                if float_id:
+                    cursor.execute("SELECT MAX(profile_time) FROM argo_observations WHERE float_id = ?", (str(float_id),))
+                elif region:
+                    db_region = "Bay of Bengal" if "bengal" in region.lower() else ("Arabian Sea" if "arabian" in region.lower() else region)
+                    cursor.execute("SELECT MAX(profile_time) FROM argo_observations WHERE region = ?", (db_region,))
+                else:
+                    cursor.execute("SELECT MAX(profile_time) FROM argo_observations")
+                
+                row = cursor.fetchone()
+                if row and row[0]:
+                    time_str = str(row[0]).split('T')[0]
+                    return datetime.strptime(time_str, "%Y-%m-%d")
+        except Exception as e:
+            logger.warning(f"Failed to query latest observation date from SQLite DB: {e}")
+
+        return datetime.now()
+
     def _extract_rule_params(self, text: str) -> Dict[str, Any]:
         """Extract explicit scientific parameters from current query text using rule matching."""
         lower_text = text.lower()
-        now = datetime.now()
         parsed_params: Dict[str, Any] = {}
 
         if any(r in lower_text for r in ["bay of bengal", "bob", "बंगाल की खाड़ी", "வங்காள விரிகுடா", "bengal la", "bengal"]):
@@ -460,8 +491,8 @@ class NLQueryService:
         elif any(r in lower_text for r in ["arabian sea", "arabian", "अरब सागर", "அரபிக்கடல்"]):
             parsed_params["region"] = "arabian_sea"
 
-        has_temp = any(v in lower_text for v in ["temperature", "temp", "°c", "तापमान", "வெப்பநிலை"])
-        has_psal = any(v in lower_text for v in ["salinity", "psal", "psu", "लवणता", "உவர்ப்பளவு", "உவர்ப்பு"])
+        has_temp = any(v in lower_text for v in ["temperature", "temp", "°c", "तापमान", "வெப்பநிலை", "thermocline"])
+        has_psal = any(v in lower_text for v in ["salinity", "psal", "psu", "लवणता", "உவர்ப்பளவு", "உவர்ப்பு", "halocline"])
 
         if has_temp and has_psal:
             parsed_params["variable"] = "both"
@@ -483,40 +514,68 @@ class NLQueryService:
             except ValueError:
                 pass
 
+        # Depth extraction rules
+        below_match = re.search(r'(?:below|deeper than|under|>)\s*(\d+(?:\.\d+)?)\s*(?:meters|metres|m|dbar)?', lower_text)
+        above_match = re.search(r'(?:above|shallower than|<)\s*(\d+(?:\.\d+)?)\s*(?:meters|metres|m|dbar)?', lower_text)
+        upper_match = re.search(r'upper\s*(\d+(?:\.\d+)?)\s*(?:meters|metres|m|dbar)?', lower_text)
+        between_match = re.search(r'(?:between|from)?\s*(\d+(?:\.\d+)?)\s*(?:and|to|-)\s*(\d+(?:\.\d+)?)\s*(?:meters|metres|m|dbar)?', lower_text)
+
         if "surface" in lower_text:
             parsed_params["depth_min"] = 0.0
             parsed_params["depth_max"] = 10.0
-        elif "upper" in lower_text:
-            m = re.search(r'upper\s*(\d+)\s*(?:meters|m)?', lower_text)
-            if m:
-                parsed_params["depth_min"] = 0.0
-                parsed_params["depth_max"] = float(m.group(1))
+        elif upper_match:
+            parsed_params["depth_min"] = 0.0
+            parsed_params["depth_max"] = float(upper_match.group(1))
+        elif below_match and "between" not in lower_text and "from" not in lower_text:
+            parsed_params["depth_min"] = float(below_match.group(1))
+            parsed_params["depth_max"] = 12000.0
+        elif above_match and "between" not in lower_text and "from" not in lower_text:
+            parsed_params["depth_min"] = 0.0
+            parsed_params["depth_max"] = float(above_match.group(1))
+        elif between_match and ("between" in lower_text or "from" in lower_text or "depth" in lower_text or "m" in lower_text):
+            d1 = float(between_match.group(1))
+            d2 = float(between_match.group(2))
+            parsed_params["depth_min"] = min(d1, d2)
+            parsed_params["depth_max"] = max(d1, d2)
 
-        if "depth_max" not in parsed_params:
-            depth_between_match = re.search(r'(?:between|from)?\s*(\d+)\s*(?:and|to|-)\s*(\d+)\s*(?:meters|m|dbar)?', lower_text)
-            if depth_between_match and ("between" in lower_text or "depth" in lower_text or "meters" in lower_text):
-                d1 = float(depth_between_match.group(1))
-                d2 = float(depth_between_match.group(2))
-                parsed_params["depth_min"] = min(d1, d2)
-                parsed_params["depth_max"] = max(d1, d2)
+        # Dynamic dataset date resolution
+        ref_date = self.get_latest_observation_date(
+            float_id=parsed_params.get("float_id"),
+            region=parsed_params.get("region")
+        )
 
-        if "last 6 months" in lower_text or "last six months" in lower_text or "past 6 months" in lower_text:
-            parsed_params["start_date"] = (now - timedelta(days=182)).strftime("%Y-%m-%d")
-            parsed_params["end_date"] = now.strftime("%Y-%m-%d")
-        elif "last year" in lower_text or "past year" in lower_text or "last 12 months" in lower_text:
-            parsed_params["start_date"] = (now - timedelta(days=365)).strftime("%Y-%m-%d")
-            parsed_params["end_date"] = now.strftime("%Y-%m-%d")
+        if any(kw in lower_text for kw in ["last 6 months", "last six months", "past 6 months", "past six months", "6 months"]):
+            parsed_params["start_date"] = (ref_date - timedelta(days=182)).strftime("%Y-%m-%d")
+            parsed_params["end_date"] = ref_date.strftime("%Y-%m-%d")
+        elif any(kw in lower_text for kw in ["last year", "past year", "last 12 months", "last twelve months", "past 12 months", "12 months"]):
+            parsed_params["start_date"] = (ref_date - timedelta(days=365)).strftime("%Y-%m-%d")
+            parsed_params["end_date"] = ref_date.strftime("%Y-%m-%d")
+        elif "recent" in lower_text or "latest" in lower_text:
+            parsed_params["start_date"] = (ref_date - timedelta(days=90)).strftime("%Y-%m-%d")
+            parsed_params["end_date"] = ref_date.strftime("%Y-%m-%d")
         else:
             years = re.findall(r'\b(20\d{2})\b', lower_text)
             if len(years) >= 2:
                 parsed_params["start_date"] = f"{years[0]}-01-01"
                 parsed_params["end_date"] = f"{years[1]}-12-31"
             elif len(years) == 1:
-                parsed_params["start_date"] = f"{years[0]}-01-01"
-                parsed_params["end_date"] = f"{years[0]}-12-31"
+                if "summer" in lower_text:
+                    parsed_params["start_date"] = f"{years[0]}-06-01"
+                    parsed_params["end_date"] = f"{years[0]}-08-31"
+                elif "winter" in lower_text:
+                    parsed_params["start_date"] = f"{years[0]}-12-01"
+                    parsed_params["end_date"] = f"{years[0]}-02-28"
+                elif "monsoon" in lower_text:
+                    parsed_params["start_date"] = f"{years[0]}-06-01"
+                    parsed_params["end_date"] = f"{years[0]}-09-30"
+                else:
+                    parsed_params["start_date"] = f"{years[0]}-01-01"
+                    parsed_params["end_date"] = f"{years[0]}-12-31"
 
-        if "anomal" in lower_text:
+        if "anomal" in lower_text or "heatwave" in lower_text:
             parsed_params["analysis"] = "anomaly"
+        elif "thermocline" in lower_text:
+            parsed_params["analysis"] = "thermocline"
         else:
             for mode in ALLOWED_ANALYSES:
                 if mode in lower_text:
@@ -575,7 +634,7 @@ Task: Respond to the user naturally and concisely as FloatChat in target languag
                 headers={"Content-Type": "application/json"}
             )
 
-            with urllib.request.urlopen(req, context=ssl_ctx, timeout=8) as resp:
+            with urllib.request.urlopen(req, context=ssl_ctx, timeout=3) as resp:
                 body = resp.read().decode("utf-8")
                 data = json.loads(body)
                 raw_content = data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -723,7 +782,7 @@ Task: Write a natural, friendly, 2-3 sentence AI assistant response in language 
                 headers={"Content-Type": "application/json"}
             )
 
-            with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+            with urllib.request.urlopen(req, context=ctx, timeout=3) as resp:
                 body = resp.read().decode("utf-8")
                 data = json.loads(body)
                 content = data["candidates"][0]["content"]["parts"][0]["text"].strip()

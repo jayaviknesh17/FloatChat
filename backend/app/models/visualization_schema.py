@@ -48,6 +48,8 @@ class FloatSummaryItem(BaseModel):
     profile_count: int = Field(..., description="Total profile cycles for float")
     latest_latitude: float = Field(..., description="Latest recorded latitude")
     latest_longitude: float = Field(..., description="Latest recorded longitude")
+    max_depth: Optional[float] = Field(None, description="Maximum recorded depth in meters")
+    depth_m: Optional[float] = Field(None, description="Alias for max_depth in meters")
 
 
 class FloatSummaryResponse(BaseModel):
@@ -252,3 +254,40 @@ class ProvenanceDetailResponse(BaseModel):
     qc_policy: str = Field(..., description="QC policy details")
     citation: str = Field(..., description="Official ARGO scientific citation")
     total_latency_ms: float = Field(..., description="Total API latency in ms")
+
+
+class AnomalyAnalysisInfo(BaseModel):
+    """Scientific metadata for statistical Temperature Anomaly Analysis."""
+
+    is_available: bool = Field(..., description="Whether statistical anomaly analysis is available")
+    title: str = Field("Temperature Anomaly Analysis", description="Display title for anomaly analysis")
+    status_label: str = Field(..., description="Status summary label")
+    methodology: str = Field(..., description="Statistical baseline method used")
+    total_observations_analyzed: int = Field(0, description="Total observations analyzed")
+    anomalous_observations_count: int = Field(0, description="Number of observations exceeding Z-score threshold")
+    anomaly_percentage: float = Field(0.0, description="Percentage of anomalous observations")
+    z_score_threshold: float = Field(2.0, description="Z-score threshold applied")
+    max_abs_z_score: float = Field(0.0, description="Maximum absolute Z-score detected")
+    affected_regions: List[str] = Field(default_factory=list, description="Regions with detected anomalies")
+    message: str = Field(..., description="Explanatory status message")
+
+
+class VariableSummaryResponse(BaseModel):
+    """API response payload for GET /api/v1/visualization/variable-summary."""
+
+    variable: str = Field(..., description="Requested variable ('temperature', 'salinity', 'marine_heatwaves', 'thermocline', 'trajectories', 'all')")
+    region: Optional[str] = Field(None, description="Requested region filter")
+    observation_count: int = Field(..., description="Total observation count for variable/region")
+    float_count: int = Field(..., description="Total unique ARGO float count")
+    profile_count: int = Field(0, description="Total profile cycles")
+    min_val: Optional[float] = Field(None, description="Minimum measured value")
+    max_val: Optional[float] = Field(None, description="Maximum measured value")
+    avg_val: Optional[float] = Field(None, description="Average measured value")
+    min_depth: Optional[float] = Field(None, description="Minimum measurement depth in meters")
+    max_depth: Optional[float] = Field(None, description="Maximum measurement depth in meters")
+    date_range: Dict[str, Optional[str]] = Field(..., description="Temporal coverage {start, end}")
+    anomaly_analysis: Optional[AnomalyAnalysisInfo] = Field(None, description="Statistical temperature/salinity anomaly analysis details")
+    provenance: ProvenanceInfo = Field(..., description="Data provenance metadata")
+    sqlite_db_latency_ms: float = Field(..., description="SQLite query execution latency in ms")
+    total_latency_ms: float = Field(..., description="Total API endpoint processing latency in ms")
+

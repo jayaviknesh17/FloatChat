@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/layout/Sidebar";
@@ -13,7 +13,8 @@ import { getSystemStatus } from "@/lib/api";
 import {
   getSavedQueries,
   deleteSavedQuery,
-  loadExampleQueries,
+  updateSavedQuery,
+  EXAMPLE_QUERIES,
   SAVED_STORAGE_EVENT,
 } from "@/lib/savedStorage";
 import {
@@ -22,11 +23,8 @@ import {
   Trash2,
   Play,
   Layers,
-  Sparkles,
   Calendar,
-  Globe2,
   Waves,
-  ArrowRight,
   Flame,
   Droplet,
   Route,
@@ -34,12 +32,16 @@ import {
   SlidersHorizontal,
   MoreVertical,
   Copy,
-  Compass,
-  Check,
   Plus,
   X,
   BookOpen,
   AlertTriangle,
+  Edit3,
+  Sparkles,
+  ArrowDown,
+  Check,
+  ExternalLink,
+  MessageSquare,
 } from "lucide-react";
 
 // Mini visualization preview thumbnails for saved query cards (Truthful preview representations without fake numbers)
@@ -47,8 +49,8 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
   switch (type) {
     case "temperature-anomaly":
       return (
-        <div className="w-full h-full min-h-[96px] rounded-xl overflow-hidden relative bg-[#021024] border border-cyan-500/20 flex items-center justify-center p-2 group-hover:border-cyan-400/40 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-br from-amber-500/30 via-rose-600/40 to-blue-900/60 opacity-80" />
+        <div className="w-full h-full min-h-[90px] rounded-xl overflow-hidden relative bg-[#021024] border border-cyan-500/20 flex items-center justify-center p-2 group-hover:border-cyan-400/40 transition-colors">
+          <div className="absolute inset-0 bg-gradient-to-br from-amber-500/25 via-rose-600/35 to-blue-900/50 opacity-80" />
           <svg viewBox="0 0 100 60" className="w-full h-full relative z-10 opacity-90">
             <defs>
               <radialGradient id="heat1" cx="60%" cy="40%" r="50%">
@@ -67,7 +69,7 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
             />
             <circle cx="60" cy="30" r="3" fill="#ff2a2a" stroke="#ffffff" strokeWidth="1" />
           </svg>
-          <span className="absolute bottom-1 right-1.5 text-[8.5px] font-mono-sci text-amber-300 bg-black/70 px-1.5 py-0.5 rounded border border-amber-500/20">
+          <span className="absolute bottom-1 right-1.5 text-[8.5px] font-mono-sci text-amber-300 bg-black/75 px-1.5 py-0.5 rounded border border-amber-500/20 select-none">
             Thermal Anomaly
           </span>
         </div>
@@ -75,7 +77,7 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
 
     case "salinity-profile":
       return (
-        <div className="w-full h-full min-h-[96px] rounded-xl overflow-hidden relative bg-[#021024] border border-cyan-500/20 flex flex-col justify-between p-2 group-hover:border-cyan-400/40 transition-colors">
+        <div className="w-full h-full min-h-[90px] rounded-xl overflow-hidden relative bg-[#021024] border border-cyan-500/20 flex flex-col justify-between p-2 group-hover:border-cyan-400/40 transition-colors">
           <svg viewBox="0 0 100 60" className="w-full h-full">
             <line x1="15" y1="5" x2="15" y2="55" stroke="#1e3a5f" strokeWidth="1" />
             <line x1="15" y1="55" x2="95" y2="55" stroke="#1e3a5f" strokeWidth="1" />
@@ -84,7 +86,7 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
             <path d="M 35 8 Q 55 16 70 30 T 80 52" fill="none" stroke="#10b981" strokeWidth="1.2" opacity="0.7" />
             <line x1="15" y1="28" x2="95" y2="28" stroke="#ef4444" strokeWidth="1" strokeDasharray="2 2" opacity="0.6" />
           </svg>
-          <div className="flex justify-between items-center text-[8px] font-mono-sci text-cyan-300/80 px-0.5">
+          <div className="flex justify-between items-center text-[8px] font-mono-sci text-cyan-300/80 px-0.5 select-none">
             <span>Surface</span>
             <span>Deep Layer</span>
           </div>
@@ -93,17 +95,17 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
 
     case "thermocline-depth":
       return (
-        <div className="w-full h-full min-h-[96px] rounded-xl overflow-hidden relative bg-[#021024] border border-teal-500/20 flex items-center justify-center p-1.5 group-hover:border-teal-400/40 transition-colors">
+        <div className="w-full h-full min-h-[90px] rounded-xl overflow-hidden relative bg-[#021024] border border-teal-500/20 flex items-center justify-center p-1.5 group-hover:border-teal-400/40 transition-colors">
           <div className="w-full h-full rounded flex flex-col relative overflow-hidden">
             <div className="h-1/3 bg-gradient-to-b from-rose-500/70 to-amber-500/60" />
             <div className="h-1/3 bg-gradient-to-b from-teal-500/60 to-blue-600/70 relative">
               <div className="absolute top-1/2 left-0 right-0 border-t border-dashed border-amber-300/90 flex items-center justify-end pr-1">
-                <span className="text-[7.5px] font-mono-sci text-amber-200 bg-black/70 px-1 rounded">Gradient Max</span>
+                <span className="text-[7.5px] font-mono-sci text-amber-200 bg-black/75 px-1 rounded">Gradient Max</span>
               </div>
             </div>
             <div className="h-1/3 bg-gradient-to-b from-blue-700/70 to-slate-950/90" />
           </div>
-          <span className="absolute bottom-1 left-2 text-[8px] font-mono-sci text-cyan-300 bg-black/70 px-1.5 py-0.5 rounded border border-cyan-500/20">
+          <span className="absolute bottom-1 left-2 text-[8px] font-mono-sci text-cyan-300 bg-black/75 px-1.5 py-0.5 rounded border border-cyan-500/20 select-none">
             Thermocline
           </span>
         </div>
@@ -111,7 +113,7 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
 
     case "marine-heatwaves":
       return (
-        <div className="w-full h-full min-h-[96px] rounded-xl overflow-hidden relative bg-[#021024] border border-purple-500/20 flex items-center justify-center p-2 group-hover:border-purple-400/40 transition-colors">
+        <div className="w-full h-full min-h-[90px] rounded-xl overflow-hidden relative bg-[#021024] border border-purple-500/20 flex items-center justify-center p-2 group-hover:border-purple-400/40 transition-colors">
           <div className="absolute inset-0 bg-gradient-to-tr from-purple-950/40 via-rose-950/30 to-amber-950/40" />
           <svg viewBox="0 0 100 60" className="w-full h-full relative z-10">
             <circle cx="35" cy="25" r="14" fill="#f43f5e" opacity="0.4" />
@@ -120,7 +122,7 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
             <circle cx="70" cy="38" r="5" fill="#f43f5e" opacity="0.8" />
             <path d="M 10 50 Q 40 45 70 48 T 95 40" fill="none" stroke="#06b6d4" strokeWidth="1" strokeDasharray="2 2" />
           </svg>
-          <span className="absolute bottom-1 right-1.5 text-[8px] font-mono-sci text-rose-300 bg-black/70 px-1.5 py-0.5 rounded border border-rose-500/20">
+          <span className="absolute bottom-1 right-1.5 text-[8px] font-mono-sci text-rose-300 bg-black/75 px-1.5 py-0.5 rounded border border-rose-500/20 select-none">
             Anomaly Analysis
           </span>
         </div>
@@ -128,7 +130,7 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
 
     case "float-trajectory":
       return (
-        <div className="w-full h-full min-h-[96px] rounded-xl overflow-hidden relative bg-[#021024] border border-emerald-500/20 flex items-center justify-center p-2 group-hover:border-emerald-400/40 transition-colors">
+        <div className="w-full h-full min-h-[90px] rounded-xl overflow-hidden relative bg-[#021024] border border-emerald-500/20 flex items-center justify-center p-2 group-hover:border-emerald-400/40 transition-colors">
           <svg viewBox="0 0 100 60" className="w-full h-full">
             <path
               d="M 20 48 C 30 20, 50 15, 65 30 S 85 45, 82 20"
@@ -142,7 +144,7 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
             <circle cx="65" cy="30" r="2.5" fill="#fbbf24" />
             <circle cx="82" cy="20" r="4" fill="#f59e0b" stroke="#ffffff" strokeWidth="1" />
           </svg>
-          <span className="absolute bottom-1 right-1.5 text-[8px] font-mono-sci text-emerald-300 bg-black/70 px-1.5 py-0.5 rounded border border-emerald-500/20">
+          <span className="absolute bottom-1 right-1.5 text-[8px] font-mono-sci text-emerald-300 bg-black/75 px-1.5 py-0.5 rounded border border-emerald-500/20 select-none">
             Drift Track
           </span>
         </div>
@@ -151,7 +153,7 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
     case "surface-trends":
     default:
       return (
-        <div className="w-full h-full min-h-[96px] rounded-xl overflow-hidden relative bg-[#021024] border border-cyan-500/20 flex flex-col justify-between p-2 group-hover:border-cyan-400/40 transition-colors">
+        <div className="w-full h-full min-h-[90px] rounded-xl overflow-hidden relative bg-[#021024] border border-cyan-500/20 flex flex-col justify-between p-2 group-hover:border-cyan-400/40 transition-colors">
           <svg viewBox="0 0 100 60" className="w-full h-full">
             <path
               d="M 10 45 Q 25 15, 45 35 T 75 18 T 95 38"
@@ -162,7 +164,7 @@ function QueryThumbnail({ type }: { type?: SavedQuery["thumbnailType"] }) {
             <circle cx="75" cy="18" r="3" fill="#f43f5e" stroke="#fff" strokeWidth="1" />
             <circle cx="25" cy="15" r="2.5" fill="#38bdf8" />
           </svg>
-          <div className="flex justify-between items-center text-[8px] font-mono-sci text-slate-400 px-0.5">
+          <div className="flex justify-between items-center text-[8px] font-mono-sci text-slate-400 px-0.5 select-none">
             <span>Temporal</span>
             <span className="text-cyan-400 font-bold">Trend</span>
           </div>
@@ -198,12 +200,6 @@ function getCategoryMeta(category?: string, variable?: string) {
       bg: "bg-teal-500/15 border-teal-500/30 text-teal-400 shadow-[0_0_10px_rgba(20,184,166,0.2)]",
     };
   }
-  if (cat.includes("trend")) {
-    return {
-      icon: Waves,
-      bg: "bg-indigo-500/15 border-indigo-500/30 text-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.2)]",
-    };
-  }
   return {
     icon: Thermometer,
     bg: "bg-rose-500/15 border-rose-500/30 text-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.2)]",
@@ -212,6 +208,7 @@ function getCategoryMeta(category?: string, variable?: string) {
 
 export default function SavedQueriesPage() {
   const router = useRouter();
+  const examplesSectionRef = useRef<HTMLDivElement>(null);
 
   const [status, setStatus] = useState<SystemStatus>({
     isConnected: false,
@@ -230,7 +227,17 @@ export default function SavedQueriesPage() {
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "alpha">("newest");
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
-  // Modals
+  // Delete confirmation modal state
+  const [deletingQuery, setDeletingQuery] = useState<SavedQuery | null>(null);
+
+  // Edit modal state
+  const [editingQuery, setEditingQuery] = useState<SavedQuery | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editQueryText, setEditQueryText] = useState("");
+  const [editCategory, setEditCategory] = useState("Temperature");
+  const [editTags, setEditTags] = useState("");
+
+  // Modals & Toast
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -240,7 +247,7 @@ export default function SavedQueriesPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Load status & saved queries on mount
+  // Load backend status & saved queries on mount
   useEffect(() => {
     setSavedQueries(getSavedQueries());
     getSystemStatus().then((s) => setStatus(s)).catch(() => {});
@@ -266,8 +273,47 @@ export default function SavedQueriesPage() {
     return () => window.removeEventListener("click", handleOutsideClick);
   }, [activeMenuId]);
 
-  // Instant client-side filtering & sorting
-  const filteredQueries = useMemo(() => {
+  // Handle ESC key for closing modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (deletingQuery) setDeletingQuery(null);
+        if (editingQuery) setEditingQuery(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [deletingQuery, editingQuery]);
+
+  // Real data metrics summary from user queries
+  const summaryMetrics = useMemo(() => {
+    if (savedQueries.length === 0) return null;
+
+    const categoriesSet = new Set<string>();
+    savedQueries.forEach((q) => {
+      const cat = q.category || q.variable || "Temperature";
+      categoriesSet.add(cat);
+    });
+
+    const sortedDates = [...savedQueries]
+      .map((q) => new Date(q.savedAt).getTime())
+      .filter((t) => !isNaN(t))
+      .sort((a, b) => b - a);
+
+    const latestDate = sortedDates.length > 0 ? new Date(sortedDates[0]) : null;
+
+    return {
+      total: savedQueries.length,
+      categoriesCount: categoriesSet.size,
+      categoriesList: Array.from(categoriesSet).slice(0, 3).join(", "),
+      latestDateFormatted: latestDate
+        ? latestDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        : "Recent",
+    };
+  }, [savedQueries]);
+
+  // Client-side filtering & sorting of User Saved Queries
+  const filteredUserQueries = useMemo(() => {
     return savedQueries
       .filter((q) => {
         // Category filter
@@ -280,15 +326,16 @@ export default function SavedQueriesPage() {
           if (target === "trajectories" && !cat.includes("traject") && !cat.includes("float")) return false;
         }
 
-        // Search term
+        // Search text
         if (searchQuery.trim()) {
           const term = searchQuery.toLowerCase();
           const matchesTitle = (q.title || "").toLowerCase().includes(term);
           const matchesText = q.queryText.toLowerCase().includes(term);
           const matchesRegion = (q.region || "").toLowerCase().includes(term);
           const matchesVar = (q.variable || "").toLowerCase().includes(term);
+          const matchesFloat = (q.floatId || "").toLowerCase().includes(term);
           const matchesTags = (q.tags || []).some((t) => t.toLowerCase().includes(term));
-          return matchesTitle || matchesText || matchesRegion || matchesVar || matchesTags;
+          return matchesTitle || matchesText || matchesRegion || matchesVar || matchesFloat || matchesTags;
         }
 
         return true;
@@ -304,29 +351,97 @@ export default function SavedQueriesPage() {
       });
   }, [savedQueries, searchQuery, selectedFilter, sortBy]);
 
-  // Run Query Again -> Navigate to chat with query parameter
-  const handleRunAgain = (queryItem: SavedQuery) => {
-    const encoded = encodeURIComponent(queryItem.queryText);
+  // Filtering of Example Queries
+  const filteredExampleQueries = useMemo(() => {
+    return EXAMPLE_QUERIES.filter((eq) => {
+      if (selectedFilter !== "All Queries") {
+        const cat = (eq.category || eq.variable || "").toLowerCase();
+        const target = selectedFilter.toLowerCase();
+        if (target === "temperature" && !cat.includes("temp") && !cat.includes("thermocline")) return false;
+        if (target === "salinity" && !cat.includes("salin")) return false;
+        if (target === "anomalies" && !cat.includes("anomal") && !cat.includes("heatwave")) return false;
+        if (target === "trajectories" && !cat.includes("traject") && !cat.includes("float")) return false;
+      }
+
+      if (searchQuery.trim()) {
+        const term = searchQuery.toLowerCase();
+        const matchesTitle = (eq.title || "").toLowerCase().includes(term);
+        const matchesText = eq.queryText.toLowerCase().includes(term);
+        const matchesRegion = (eq.region || "").toLowerCase().includes(term);
+        const matchesVar = (eq.variable || "").toLowerCase().includes(term);
+        const matchesTags = (eq.tags || []).some((t) => t.toLowerCase().includes(term));
+        return matchesTitle || matchesText || matchesRegion || matchesVar || matchesTags;
+      }
+
+      return true;
+    });
+  }, [searchQuery, selectedFilter]);
+
+  // Action Handlers
+  const handleRunQuery = (queryText: string) => {
+    const encoded = encodeURIComponent(queryText);
     router.push(`/?q=${encoded}&run=1`);
   };
 
-  // Delete query
-  const handleDelete = (id: string, e?: React.MouseEvent) => {
+  const handleEditInComposer = (queryText: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    deleteSavedQuery(id);
     setActiveMenuId(null);
-    showToast("Query deleted from your saved library.");
+    const encoded = encodeURIComponent(queryText);
+    router.push(`/?q=${encoded}&edit=1`);
   };
 
-  // Copy query prompt
+  const handleOpenEditModal = (query: SavedQuery, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setActiveMenuId(null);
+    setEditingQuery(query);
+    setEditTitle(query.title || "");
+    setEditQueryText(query.queryText || "");
+    setEditCategory(query.category || "Temperature");
+    setEditTags((query.tags || []).join(", "));
+  };
+
+  const handleSaveEditedQuery = () => {
+    if (!editingQuery) return;
+    if (!editQueryText.trim()) {
+      showToast("Query text cannot be empty.");
+      return;
+    }
+
+    const tagsArray = editTags
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+
+    updateSavedQuery(editingQuery.id, {
+      title: editTitle.trim() || undefined,
+      queryText: editQueryText.trim(),
+      category: editCategory,
+      tags: tagsArray.length > 0 ? tagsArray : undefined,
+    });
+
+    setEditingQuery(null);
+    showToast("Query details updated successfully.");
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deletingQuery) return;
+    deleteSavedQuery(deletingQuery.id);
+    setDeletingQuery(null);
+    setActiveMenuId(null);
+    showToast("Query deleted from your saved workspace.");
+  };
+
   const handleCopyPrompt = (text: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     navigator.clipboard.writeText(text);
     setActiveMenuId(null);
-    showToast("Query text copied to clipboard!");
+    showToast("Query prompt copied to clipboard!");
   };
 
-  // Format date helper
+  const scrollToExamples = () => {
+    examplesSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
   const formatDate = (isoString: string) => {
     try {
       const d = new Date(isoString);
@@ -334,9 +449,6 @@ export default function SavedQueriesPage() {
         month: "short",
         day: "numeric",
         year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
       });
     } catch {
       return "Recent";
@@ -355,7 +467,7 @@ export default function SavedQueriesPage() {
     <div className="relative min-h-screen w-screen bg-[#020a16] text-slate-100 flex flex-row font-sans selection:bg-cyan-500/30 selection:text-cyan-200 overflow-x-hidden">
       <OceanBackground />
 
-      {/* Collapsible Left Glass Sidebar */}
+      {/* Sidebar */}
       <Sidebar
         status={status}
         isOpen={sidebarOpen}
@@ -365,26 +477,24 @@ export default function SavedQueriesPage() {
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
-      {/* Main Viewport Shell */}
+      {/* Main Container */}
       <div
         className={`flex-1 flex flex-col min-h-screen relative z-10 transition-all duration-200 ease-in-out ${
           sidebarOpen ? "lg:pl-[256px]" : "lg:pl-[68px]"
         }`}
       >
-        {/* Top-Right Status & Avatar Header */}
         <TopNav
           status={status}
           onOpenAbout={() => setIsAboutOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
-        {/* Main Content Area */}
-        <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8 flex flex-col gap-5">
-          {/* 1. Page Header Section */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="space-y-1">
+        <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12 flex flex-col gap-6">
+          {/* 1. HEADER AND PAGE PURPOSE */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2">
+            <div className="space-y-1.5">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 p-[1.5px] shadow-[0_0_18px_rgba(6,182,212,0.4)]">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 p-[1.5px] shadow-[0_0_18px_rgba(6,182,212,0.4)] shrink-0">
                   <div className="w-full h-full bg-[#051428] rounded-[14px] flex items-center justify-center">
                     <Bookmark className="w-5 h-5 text-cyan-300" />
                   </div>
@@ -395,25 +505,44 @@ export default function SavedQueriesPage() {
                   </h1>
                 </div>
               </div>
-              <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed pl-0.5">
-                Your saved questions, analyses, and visualizations. Revisit, modify, or run them again anytime.
+              <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+                Save, manage, edit, and rerun your ocean research questions and ARGO data analyses.
               </p>
+
+              {/* Real Data Metrics Summary Bar */}
+              {summaryMetrics && (
+                <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] font-mono-sci text-cyan-300/90">
+                  <span className="px-2.5 py-0.5 rounded-md bg-cyan-950/70 border border-cyan-500/25 text-cyan-200">
+                    {summaryMetrics.total} {summaryMetrics.total === 1 ? "Saved Query" : "Saved Queries"}
+                  </span>
+                  <span>•</span>
+                  <span className="text-slate-300">
+                    Latest: <strong className="text-cyan-200">{summaryMetrics.latestDateFormatted}</strong>
+                  </span>
+                  <span>•</span>
+                  <span className="text-slate-300">
+                    Categories: <strong className="text-cyan-200">{summaryMetrics.categoriesList}</strong>
+                  </span>
+                </div>
+              )}
             </div>
 
-            {/* Top Right: Immediate Search Bar */}
-            <div className="relative w-full md:w-72">
-              <Search className="w-4 h-4 text-cyan-400/80 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            {/* Search Input Box */}
+            <div className="relative w-full md:w-80 shrink-0">
+              <Search className="w-4 h-4 text-cyan-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search saved queries..."
-                className="w-full pl-10 pr-9 py-2 rounded-xl bg-[#04162e]/85 border border-cyan-500/25 text-xs text-white placeholder:text-slate-400 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-sm"
+                placeholder="Search saved queries by title, question, region..."
+                className="w-full pl-10 pr-9 py-2 rounded-xl bg-[#04162e]/90 border border-cyan-500/25 text-xs text-white placeholder:text-slate-400 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-sm"
+                aria-label="Search saved queries"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                  aria-label="Clear search"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -421,9 +550,9 @@ export default function SavedQueriesPage() {
             </div>
           </div>
 
-          {/* 2. Category Filter Pills & Sort Control Bar */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-1 border-b border-cyan-500/15">
-            {/* Category Filter Pills */}
+          {/* 2. CATEGORY FILTERS & SORTING BAR */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b border-cyan-500/15">
+            {/* Category Pills */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 w-full sm:w-auto scrollbar-none">
               {categories.map((cat) => {
                 const IconComponent = cat.icon;
@@ -445,206 +574,328 @@ export default function SavedQueriesPage() {
               })}
             </div>
 
-            {/* Sort Control Dropdown */}
+            {/* Sort Options */}
             <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#04162e]/80 border border-cyan-500/25 text-xs text-slate-300">
                 <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400" />
+                <label htmlFor="saved-sort-select" className="sr-only">Sort queries by</label>
                 <select
+                  id="saved-sort-select"
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as any)}
                   className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer pr-1"
                 >
                   <option value="newest" className="bg-[#051428] text-white">Most Recent</option>
                   <option value="oldest" className="bg-[#051428] text-white">Oldest</option>
-                  <option value="alpha" className="bg-[#051428] text-white">A–Z</option>
+                  <option value="alpha" className="bg-[#051428] text-white">Alphabetical (A–Z)</option>
                 </select>
               </div>
             </div>
           </div>
 
-          {/* 3. Two-Column Saved Query Cards Grid */}
-          {filteredQueries.length > 0 ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {filteredQueries.map((queryItem) => {
-                const meta = getCategoryMeta(queryItem.category, queryItem.variable);
+          {/* 3. USER SAVED QUERIES SECTION */}
+          {savedQueries.length > 0 ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold text-white flex items-center gap-2 tracking-tight">
+                  <Bookmark className="w-4 h-4 text-cyan-400" />
+                  <span>Your Saved Queries</span>
+                  <span className="px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-500/30 text-[11px] font-mono-sci">
+                    {filteredUserQueries.length}
+                  </span>
+                </h2>
+                {(searchQuery || selectedFilter !== "All Queries") && (
+                  <button
+                    onClick={() => {
+                      setSearchQuery("");
+                      setSelectedFilter("All Queries");
+                    }}
+                    className="text-xs text-cyan-400 hover:text-cyan-200 underline"
+                  >
+                    Reset filters
+                  </button>
+                )}
+              </div>
+
+              {filteredUserQueries.length > 0 ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {filteredUserQueries.map((queryItem) => {
+                    const meta = getCategoryMeta(queryItem.category, queryItem.variable);
+                    const CategoryIcon = meta.icon;
+                    const isMenuOpen = activeMenuId === queryItem.id;
+
+                    return (
+                      <div
+                        key={queryItem.id}
+                        className="group relative rounded-2xl bg-[#05172e]/85 backdrop-blur-md border border-cyan-500/20 hover:border-cyan-400/40 p-4 transition-all duration-200 shadow-[0_4px_20px_rgba(0,0,0,0.3)] flex flex-col justify-between gap-3 hover:shadow-[0_8px_30px_rgba(6,182,212,0.15)]"
+                      >
+                        {/* Top Content Row */}
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-start">
+                          <div className="sm:col-span-8 space-y-2">
+                            <div className="flex items-center gap-2.5">
+                              <div
+                                className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${meta.bg}`}
+                              >
+                                <CategoryIcon className="w-3.5 h-3.5" />
+                              </div>
+                              <h3 className="text-sm font-bold text-white tracking-tight group-hover:text-cyan-200 transition-colors line-clamp-1">
+                                {queryItem.title || queryItem.queryText}
+                              </h3>
+                            </div>
+
+                            <p className="text-xs text-slate-300 font-normal leading-relaxed line-clamp-2 italic">
+                              &ldquo;{queryItem.queryText}&rdquo;
+                            </p>
+
+                            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                              {(queryItem.tags && queryItem.tags.length > 0
+                                ? queryItem.tags
+                                : [queryItem.region, queryItem.variable, queryItem.category]
+                              )
+                                .filter(Boolean)
+                                .map((tag, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-cyan-950/70 border border-cyan-500/25 text-cyan-200"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                            </div>
+                          </div>
+
+                          {/* Thumbnail */}
+                          <div className="sm:col-span-4 h-24 sm:h-full w-full">
+                            <QueryThumbnail type={queryItem.thumbnailType} />
+                          </div>
+                        </div>
+
+                        {/* Bottom Actions Row */}
+                        <div className="pt-2.5 border-t border-cyan-500/15 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1 text-[11px] text-slate-400 font-mono-sci">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                            <span>{formatDate(queryItem.savedAt)}</span>
+                          </div>
+
+                          <div className="flex items-center gap-2 overflow-menu-container relative">
+                            {/* Run Again Button */}
+                            <button
+                              onClick={() => handleRunQuery(queryItem.queryText)}
+                              className="px-3.5 py-1.5 rounded-xl bg-cyan-500 text-slate-950 hover:bg-cyan-400 text-xs font-bold flex items-center gap-1.5 transition-all shadow-[0_0_12px_rgba(6,182,212,0.3)]"
+                              title="Run query live with real ARGO backend execution"
+                            >
+                              <Play className="w-3.5 h-3.5 fill-slate-950 text-slate-950" />
+                              <span>Run Again</span>
+                            </button>
+
+                            {/* Dropdown Toggle */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuId(isMenuOpen ? null : queryItem.id);
+                              }}
+                              className="p-1.5 rounded-lg hover:bg-cyan-950 text-slate-400 hover:text-white border border-transparent hover:border-cyan-500/30 transition-colors"
+                              title="More options"
+                              aria-label="More options"
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+
+                            {/* Dropdown Menu */}
+                            {isMenuOpen && (
+                              <div className="absolute right-0 bottom-full mb-1.5 w-48 rounded-xl bg-[#031428] border border-cyan-500/30 shadow-[0_8px_24px_rgba(0,0,0,0.6)] py-1.5 z-30 animate-in fade-in zoom-in-95 duration-150">
+                                <button
+                                  onClick={(e) => handleOpenEditModal(queryItem, e)}
+                                  className="w-full px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-cyan-950/70 hover:text-cyan-300 flex items-center gap-2"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
+                                  <span>Edit Details</span>
+                                </button>
+                                <button
+                                  onClick={(e) => handleEditInComposer(queryItem.queryText, e)}
+                                  className="w-full px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-cyan-950/70 hover:text-cyan-300 flex items-center gap-2"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
+                                  <span>Edit in Composer</span>
+                                </button>
+                                <button
+                                  onClick={(e) => handleCopyPrompt(queryItem.queryText, e)}
+                                  className="w-full px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-cyan-950/70 hover:text-cyan-300 flex items-center gap-2"
+                                >
+                                  <Copy className="w-3.5 h-3.5 text-cyan-400" />
+                                  <span>Copy Prompt</span>
+                                </button>
+                                <div className="my-1 border-t border-cyan-500/15" />
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeletingQuery(queryItem);
+                                    setActiveMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left text-xs text-rose-300 hover:bg-rose-950/50 hover:text-rose-200 flex items-center gap-2"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                                  <span>Delete Query</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl bg-[#05172e]/60 border border-cyan-500/20 p-8 text-center space-y-2">
+                  <p className="text-sm font-semibold text-slate-300">
+                    No user saved queries match &ldquo;{searchQuery || selectedFilter}&rdquo;
+                  </p>
+                  <button
+                    onClick={() => {
+                      setSearchQuery("");
+                      setSelectedFilter("All Queries");
+                    }}
+                    className="text-xs text-cyan-400 hover:text-cyan-200 underline"
+                  >
+                    Clear search and filter criteria
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* 4. EMPTY STATE (When no user saved queries exist) */
+            <div className="rounded-2xl bg-[#05172e]/60 border border-cyan-500/20 p-8 sm:p-12 text-center flex flex-col items-center justify-center space-y-4 max-w-xl mx-auto my-4 shadow-xl">
+              <div className="w-14 h-14 rounded-2xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-300 shadow-[0_0_24px_rgba(6,182,212,0.25)]">
+                <Bookmark className="w-7 h-7" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="text-lg font-bold text-white tracking-tight">
+                  Your research workspace is empty
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
+                  Save questions and ocean analysis results from FloatChat to quickly revisit or rerun them anytime.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <Link
+                  href="/"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs flex items-center gap-2 transition-all shadow-[0_0_18px_rgba(6,182,212,0.4)]"
+                >
+                  <Plus className="w-4 h-4 text-slate-950" />
+                  <span>Start New Chat</span>
+                </Link>
+                <button
+                  onClick={scrollToExamples}
+                  className="px-4.5 py-2.5 rounded-xl bg-[#04162e] hover:bg-cyan-950 border border-cyan-500/30 text-xs font-semibold text-cyan-300 flex items-center gap-2 transition-colors"
+                >
+                  <BookOpen className="w-4 h-4 text-cyan-400" />
+                  <span>Explore Example Queries</span>
+                  <ArrowDown className="w-3.5 h-3.5 text-cyan-400" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 5. SEPARATE EXAMPLE RESEARCH QUERIES SECTION */}
+          <div ref={examplesSectionRef} id="example-queries-section" className="pt-6 border-t border-cyan-500/20 space-y-4">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 tracking-tight">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>Explore Example Research Queries</span>
+                </h2>
+                <span className="text-[11px] font-mono-sci text-amber-300/80 bg-amber-950/60 px-2.5 py-0.5 rounded-md border border-amber-500/30">
+                  Built-in Scientific Examples
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Demonstration ocean research queries showcasing FloatChat capabilities. Run an example to query live ARGO ocean data.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredExampleQueries.map((ex) => {
+                const meta = getCategoryMeta(ex.category, ex.variable);
                 const CategoryIcon = meta.icon;
-                const isMenuOpen = activeMenuId === queryItem.id;
 
                 return (
                   <div
-                    key={queryItem.id}
-                    className="group relative rounded-2xl bg-[#05172e]/85 backdrop-blur-md border border-cyan-500/20 hover:border-cyan-400/40 p-4.5 transition-all duration-200 shadow-[0_4px_20px_rgba(0,0,0,0.3)] flex flex-col justify-between gap-3.5 hover:shadow-[0_8px_30px_rgba(6,182,212,0.15)]"
+                    key={ex.id}
+                    className="group rounded-2xl bg-[#04162e]/70 backdrop-blur-md border border-cyan-500/20 hover:border-amber-500/40 p-4 transition-all duration-200 flex flex-col justify-between gap-3 shadow-[0_4px_16px_rgba(0,0,0,0.25)] hover:shadow-[0_6px_24px_rgba(245,158,11,0.15)]"
                   >
-                    {/* Top Row: Left details & Right Thumbnail */}
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-start">
-                      {/* Left: Icon, Title, Prompt & Chips */}
-                      <div className="sm:col-span-8 space-y-2.5">
-                        {/* Title Header */}
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border ${meta.bg}`}
-                          >
-                            <CategoryIcon className="w-4 h-4" />
-                          </div>
-                          <h3 className="text-sm sm:text-base font-bold text-white tracking-tight group-hover:text-cyan-200 transition-colors line-clamp-1">
-                            {queryItem.title || queryItem.queryText}
-                          </h3>
+                    <div className="space-y-2.5">
+                      {/* Top Category Badge & Title */}
+                      <div className="flex items-center gap-2">
+                        <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border ${meta.bg}`}>
+                          <CategoryIcon className="w-3 h-3" />
                         </div>
-
-                        {/* Natural Language Question Prompt */}
-                        <p className="text-xs text-slate-300 font-normal leading-relaxed pl-0.5 line-clamp-2 italic">
-                          &ldquo;{queryItem.queryText}&rdquo;
-                        </p>
-
-                        {/* Metadata Chips */}
-                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                          {(queryItem.tags && queryItem.tags.length > 0
-                            ? queryItem.tags
-                            : [queryItem.region, queryItem.variable, queryItem.category]
-                          )
-                            .filter(Boolean)
-                            .map((tag, idx) => (
-                              <span
-                                key={idx}
-                                className={`px-2 py-0.5 rounded-md text-[10.5px] font-medium tracking-wide ${
-                                  tag === "Example"
-                                    ? "bg-amber-950/70 border border-amber-500/40 text-amber-200"
-                                    : "bg-cyan-950/70 border border-cyan-500/25 text-cyan-200"
-                                }`}
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                        </div>
+                        <h3 className="text-xs sm:text-sm font-bold text-white group-hover:text-amber-200 transition-colors line-clamp-1">
+                          {ex.title}
+                        </h3>
                       </div>
 
-                      {/* Right: Visualization Preview Thumbnail */}
-                      <div className="sm:col-span-4 h-24 sm:h-full w-full">
-                        <QueryThumbnail type={queryItem.thumbnailType} />
+                      {/* Question Prompt */}
+                      <p className="text-xs text-slate-300 leading-relaxed italic line-clamp-2">
+                        &ldquo;{ex.queryText}&rdquo;
+                      </p>
+
+                      {/* Category & Region Chips */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/70 border border-amber-500/30 text-amber-200">
+                          Built-in Example
+                        </span>
+                        {ex.region && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-cyan-950/60 border border-cyan-500/25 text-cyan-200">
+                            {ex.region}
+                          </span>
+                        )}
+                        {ex.category && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800/80 border border-slate-700 text-slate-300">
+                            {ex.category}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Preview Thumbnail */}
+                      <div className="h-20 w-full pt-1">
+                        <QueryThumbnail type={ex.thumbnailType} />
                       </div>
                     </div>
 
-                    {/* Bottom Footer Row: Date, Run Again, Overflow */}
-                    <div className="pt-3 border-t border-cyan-500/15 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono-sci">
-                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                        <span>{formatDate(queryItem.savedAt)}</span>
-                      </div>
+                    {/* Bottom CTA */}
+                    <div className="pt-2 border-t border-cyan-500/15 flex items-center justify-between gap-2">
+                      <button
+                        onClick={(e) => handleCopyPrompt(ex.queryText, e)}
+                        className="p-1 rounded-lg text-slate-400 hover:text-cyan-300 hover:bg-cyan-950/60 transition-colors"
+                        title="Copy prompt text"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
 
-                      <div className="flex items-center gap-2 overflow-menu-container relative">
-                        {/* Run Again Button */}
-                        <button
-                          onClick={() => handleRunAgain(queryItem)}
-                          className="px-3.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-[0_0_10px_rgba(6,182,212,0.15)]"
-                          title="Execute this query live with real ARGO data"
-                        >
-                          <Play className="w-3 h-3 fill-cyan-400 text-cyan-400" />
-                          <span>Run Again</span>
-                        </button>
-
-                        {/* Overflow Menu Button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveMenuId(isMenuOpen ? null : queryItem.id);
-                          }}
-                          className="p-1.5 rounded-lg hover:bg-cyan-950/80 text-slate-400 hover:text-white border border-transparent hover:border-cyan-500/30 transition-colors"
-                          title="More options"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
-
-                        {/* Dropdown Menu */}
-                        {isMenuOpen && (
-                          <div className="absolute right-0 bottom-full mb-1.5 w-44 rounded-xl bg-[#031428] border border-cyan-500/30 shadow-[0_8px_24px_rgba(0,0,0,0.6)] py-1.5 z-30 animate-in fade-in zoom-in-95 duration-150">
-                            <button
-                              onClick={(e) => handleCopyPrompt(queryItem.queryText, e)}
-                              className="w-full px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-cyan-950/70 hover:text-cyan-300 flex items-center gap-2"
-                            >
-                              <Copy className="w-3.5 h-3.5 text-cyan-400" />
-                              <span>Copy Query Text</span>
-                            </button>
-                            <button
-                              onClick={() => handleRunAgain(queryItem)}
-                              className="w-full px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-cyan-950/70 hover:text-cyan-300 flex items-center gap-2"
-                            >
-                              <Compass className="w-3.5 h-3.5 text-cyan-400" />
-                              <span>Open in Chat</span>
-                            </button>
-                            <div className="my-1 border-t border-cyan-500/15" />
-                            <button
-                              onClick={(e) => handleDelete(queryItem.id, e)}
-                              className="w-full px-3 py-1.5 text-left text-xs text-rose-300 hover:bg-rose-950/50 hover:text-rose-200 flex items-center gap-2"
-                            >
-                              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                              <span>Delete Query</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      <button
+                        onClick={() => handleRunQuery(ex.queryText)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-[0_0_10px_rgba(245,158,11,0.15)]"
+                        title="Execute this example query against live backend"
+                      >
+                        <Play className="w-3 h-3 fill-amber-400 text-amber-400" />
+                        <span>Run Example</span>
+                      </button>
                     </div>
                   </div>
                 );
               })}
             </div>
-          ) : (
-            /* 4. Empty State */
-            <div className="rounded-2xl bg-[#05172e]/60 border border-cyan-500/20 p-12 text-center flex flex-col items-center justify-center space-y-4 max-w-xl mx-auto my-8">
-              <div className="w-14 h-14 rounded-2xl bg-cyan-950/70 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
-                <Bookmark className="w-7 h-7" />
-              </div>
-              <div className="space-y-1.5">
-                <h3 className="text-lg font-bold text-white tracking-tight">
-                  {searchQuery ? "No matching queries found" : "No saved queries yet"}
-                </h3>
-                <p className="text-xs text-slate-300 max-w-sm mx-auto leading-relaxed">
-                  {searchQuery
-                    ? "Try adjusting your search terms or selecting a different category filter."
-                    : "Save ocean questions and analyses from chat to quickly revisit them here."}
-                </p>
-              </div>
-              {searchQuery ? (
-                <button
-                  onClick={() => {
-                    setSearchQuery("");
-                    setSelectedFilter("All Queries");
-                  }}
-                  className="px-4 py-2 rounded-xl bg-[#04162e] hover:bg-cyan-950 border border-cyan-500/30 text-xs font-semibold text-cyan-300 transition-colors"
-                >
-                  Clear Filters
-                </button>
-              ) : (
-                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                  <Link
-                    href="/"
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(6,182,212,0.4)]"
-                  >
-                    <Plus className="w-4 h-4 text-slate-950" />
-                    <span>Start a New Chat</span>
-                  </Link>
-                  <button
-                    onClick={() => {
-                      loadExampleQueries();
-                      showToast("Loaded example scientific queries.");
-                    }}
-                    className="px-4 py-2.5 rounded-xl bg-[#04162e] hover:bg-cyan-950 border border-cyan-500/30 text-xs font-semibold text-cyan-300 flex items-center gap-2 transition-colors"
-                  >
-                    <BookOpen className="w-4 h-4 text-cyan-400" />
-                    <span>Load Example Queries</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          </div>
 
           {/* Footer Provenance */}
           <div className="pt-6 border-t border-cyan-500/15 flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-400 font-mono-sci">
             <div className="flex items-center gap-3">
-              <span>OCEAN DATA</span>
+              <span>RESEARCH WORKSPACE</span>
               <span>•</span>
-              <span>REAL INSIGHTS</span>
+              <span>REAL ARGO DATA</span>
               <span>•</span>
-              <span>A HEALTHY PLANET</span>
+              <span>REPEATABLE SCIENCE</span>
             </div>
             <div className="flex items-center gap-2 text-cyan-300">
               <Waves className="w-4 h-4 text-cyan-400" />
@@ -654,7 +905,161 @@ export default function SavedQueriesPage() {
         </main>
       </div>
 
-      {/* Toast Notification */}
+      {/* EDIT QUERY MODAL */}
+      {editingQuery && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-lg rounded-2xl bg-[#031428] border border-cyan-500/30 p-6 shadow-[0_0_50px_rgba(6,182,212,0.25)] space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-cyan-500/20">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-cyan-950 border border-cyan-500/30 flex items-center justify-center text-cyan-300">
+                  <Edit3 className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-white tracking-tight">
+                  Edit Saved Query
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditingQuery(null)}
+                className="text-slate-400 hover:text-white p-1"
+                aria-label="Close modal"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Title (Optional display title)
+                </label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="e.g. Bay of Bengal Thermocline Study"
+                  className="w-full px-3 py-2 rounded-xl bg-[#020a16] border border-cyan-500/25 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Query Prompt / Question <span className="text-rose-400">*</span>
+                </label>
+                <textarea
+                  value={editQueryText}
+                  onChange={(e) => setEditQueryText(e.target.value)}
+                  rows={3}
+                  placeholder="Enter ocean query question..."
+                  className="w-full px-3 py-2 rounded-xl bg-[#020a16] border border-cyan-500/25 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Category</label>
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#020a16] border border-cyan-500/25 text-white focus:outline-none focus:border-cyan-400 cursor-pointer"
+                  >
+                    <option value="Temperature">Temperature</option>
+                    <option value="Salinity">Salinity</option>
+                    <option value="Anomalies">Anomalies</option>
+                    <option value="Trajectories">Trajectories</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Tags (Comma-separated)</label>
+                  <input
+                    type="text"
+                    value={editTags}
+                    onChange={(e) => setEditTags(e.target.value)}
+                    placeholder="Bay of Bengal, Thermal, Anomaly"
+                    className="w-full px-3 py-2 rounded-xl bg-[#020a16] border border-cyan-500/25 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-cyan-500/20">
+              <button
+                type="button"
+                onClick={(e) => {
+                  const text = editQueryText;
+                  setEditingQuery(null);
+                  handleEditInComposer(text, e);
+                }}
+                className="text-xs text-cyan-400 hover:text-cyan-200 flex items-center gap-1 underline"
+              >
+                <span>Edit in Home Composer</span>
+                <ExternalLink className="w-3 h-3" />
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingQuery(null)}
+                  className="px-4 py-2 rounded-xl bg-[#04162e] hover:bg-slate-800 border border-cyan-500/30 text-xs font-semibold text-slate-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEditedQuery}
+                  className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-[0_0_12px_rgba(6,182,212,0.4)] transition-all"
+                >
+                  <Check className="w-3.5 h-3.5 text-slate-950" />
+                  <span>Save Changes</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {deletingQuery && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md rounded-2xl bg-[#031428] border border-rose-500/40 p-6 shadow-[0_0_40px_rgba(244,63,94,0.2)] space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-950/80 border border-rose-500/40 flex items-center justify-center shrink-0 text-rose-400">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-white tracking-tight">
+                  Delete Saved Query?
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Are you sure you want to remove &ldquo;<span className="text-white font-medium">{deletingQuery.title || deletingQuery.queryText}</span>&rdquo; from your workspace?
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-[#020a16] border border-cyan-500/15 text-xs text-slate-400 italic line-clamp-2">
+              &ldquo;{deletingQuery.queryText}&rdquo;
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-cyan-500/15">
+              <button
+                onClick={() => setDeletingQuery(null)}
+                className="px-4 py-2 rounded-xl bg-[#04162e] hover:bg-slate-800 border border-cyan-500/30 text-xs font-semibold text-slate-300 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-[0_0_12px_rgba(244,63,94,0.4)] transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-white" />
+                <span>Delete Query</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST NOTIFICATION */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-xl bg-[#031428] border border-cyan-400 text-xs font-medium text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] flex items-center gap-2 animate-in fade-in slide-in-from-bottom-3 duration-200">
           <Check className="w-4 h-4 text-emerald-400" />
@@ -662,7 +1067,7 @@ export default function SavedQueriesPage() {
         </div>
       )}
 
-      {/* Modals */}
+      {/* MODALS */}
       <AboutModal isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </div>
