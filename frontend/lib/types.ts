@@ -237,7 +237,187 @@ export interface NLExecutionResponse {
 }
 
 /**
- * Legacy/UI compatibility types for UI components
+ * 4D Visualization Specific Interfaces
+ */
+export interface RegionSummaryItem {
+  region_id: string;
+  name: string;
+  description: string;
+  float_count: number;
+  observation_count: number;
+  date_range: { start?: string | null; end?: string | null };
+  bounds: { lat_min: number; lat_max: number; lon_min: number; lon_max: number };
+  camera_target: { lat: number; lon: number; zoom: number };
+}
+
+export interface RegionListResponse {
+  region_count: number;
+  regions: RegionSummaryItem[];
+  total_latency_ms: number;
+}
+
+export interface FloatDetailResponse {
+  float_id: string;
+  region: string;
+  platform_type: string;
+  dac: string;
+  first_observation: string;
+  last_observation: string;
+  total_observations: number;
+  total_cycles: number;
+  depth_range_m: { min: number; max: number };
+  geographic_bounds: { lat_min: number; lat_max: number; lon_min: number; lon_max: number };
+  latest_position: { lat: number; lon: number };
+  source_file: string;
+  provenance: ProvenanceInfo;
+  total_latency_ms: number;
+}
+
+export interface ProfileCycleSummary {
+  cycle_number: number;
+  profile_time: string;
+  latitude: number;
+  longitude: number;
+  level_count: number;
+  min_depth_m: number;
+  max_depth_m: number;
+  min_temp_c?: number | null;
+  max_temp_c?: number | null;
+  min_sal_psu?: number | null;
+  max_sal_psu?: number | null;
+  has_anomaly: boolean;
+}
+
+export interface FloatProfileListResponse {
+  float_id: string;
+  profile_count: number;
+  profiles: ProfileCycleSummary[];
+  total_latency_ms: number;
+}
+
+export interface ObservationPoint3D {
+  id?: number;
+  float_id: string;
+  cycle_number: number;
+  timestamp: string;
+  latitude: number;
+  longitude: number;
+  pressure_dbar: number;
+  depth_m: number;
+  temperature_c?: number | null;
+  salinity_psu?: number | null;
+  temp_qc?: string;
+  psal_qc?: string;
+  z_score?: number | null;
+  is_anomaly: boolean;
+  source_file?: string;
+}
+
+export interface Observations3DResponse {
+  point_count: number;
+  float_count: number;
+  region?: string | null;
+  date_range: { start?: string | null; end?: string | null };
+  depth_range_m: { min?: number | null; max?: number | null };
+  points: ObservationPoint3D[];
+  provenance: ProvenanceInfo;
+  sqlite_db_latency_ms: number;
+  total_latency_ms: number;
+}
+
+export interface ObservationParams {
+  region?: string;
+  float_id?: string;
+  cycle_number?: number;
+  start_date?: string;
+  end_date?: string;
+  min_depth?: number;
+  max_depth?: number;
+  variable?: string;
+  is_anomaly_only?: boolean;
+  limit?: number;
+}
+
+export interface AnomalyDetailItem {
+  float_id: string;
+  cycle_number: number;
+  profile_time: string;
+  latitude: number;
+  longitude: number;
+  region: string;
+  depth_m: number;
+  variable: string;
+  observed_value: number;
+  baseline_mean: number;
+  baseline_std: number;
+  deviation: number;
+  z_score: number;
+  depth_band: string;
+  status_label: string;
+  source_file: string;
+}
+
+export interface AnomalyListResponse {
+  anomaly_count: number;
+  anomalies: AnomalyDetailItem[];
+  threshold_z: number;
+  provenance: ProvenanceInfo;
+  total_latency_ms: number;
+}
+
+export interface ProfileLevelVisual {
+  depth_m: number;
+  pressure_dbar: number;
+  temperature_c?: number | null;
+  salinity_psu?: number | null;
+  temp_qc: string;
+  psal_qc: string;
+  z_score?: number | null;
+  is_anomaly: boolean;
+}
+
+export interface ProfileVisualAnalysisResponse {
+  float_id: string;
+  cycle_number: number;
+  profile_time: string;
+  latitude: number;
+  longitude: number;
+  region: string;
+  source_file: string;
+  levels: ProfileLevelVisual[];
+  thermocline: {
+    estimated_thermocline_depth_m?: number | null;
+    max_gradient_c_per_m?: number | null;
+    thermocline_temperature_c?: number | null;
+    methodology?: string;
+    profile_gradients?: Array<{ depth_m: number; temperature_c: number; dt_dz: number }>;
+  };
+  halocline: {
+    estimated_halocline_depth_m?: number | null;
+    max_gradient_psu_per_m?: number | null;
+    halocline_salinity_psu?: number | null;
+    methodology?: string;
+    profile_gradients?: Array<{ depth_m: number; salinity_psu: number; ds_dz: number }>;
+  };
+  provenance: ProvenanceInfo;
+  total_latency_ms: number;
+}
+
+export interface ProvenanceDetailResponse {
+  float_id?: string | null;
+  cycle_number?: number | null;
+  region: string;
+  data_source: string;
+  source_type: string;
+  netcdf_files: string[];
+  variables: string[];
+  qc_policy: string;
+  citation: string;
+  total_latency_ms: number;
+}
+
+/**
+ * UI / Chat compatibility types
  */
 export interface ProfileLevel {
   depth: number;
@@ -411,5 +591,3 @@ export interface SavedVisualization {
   savedAt: string;
   description?: string;
 }
-
-
