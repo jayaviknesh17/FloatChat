@@ -22,14 +22,14 @@ export default function Time4DController({
   onChangeSpeed,
   dateRange,
 }: Time4DControllerProps) {
-  // Dynamic Start & End times based on real dataset or default range
+  // Real dynamic Start & End times based on real dataset
   const { minTime, maxTime, ticks } = useMemo(() => {
-    const startStr = dateRange?.start || "2013-01-01T00:00:00Z";
-    const endStr = dateRange?.end || "2025-06-30T23:59:59Z";
+    const startStr = dateRange?.start || "2003-06-16T07:28:26Z";
+    const endStr = dateRange?.end || "2026-05-25T15:56:48Z";
 
     const tStart = new Date(startStr).getTime();
     const tEnd = new Date(endStr).getTime();
-    const span = tEnd - tStart;
+    const span = Math.max(tEnd - tStart, 86400000);
 
     // Generate 6 equidistant tick marks
     const generatedTicks = [0, 20, 40, 60, 80, 100].map((pct) => {
@@ -41,7 +41,7 @@ export default function Time4DController({
     return { minTime: tStart, maxTime: tEnd, ticks: generatedTicks };
   }, [dateRange]);
 
-  const currentTime = new Date(minTime + (progress / 100) * (maxTime - minTime));
+  const currentTime = new Date(minTime + (Math.max(0, Math.min(progress, 100)) / 100) * (maxTime - minTime));
   const formattedDate = currentTime.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
@@ -57,7 +57,7 @@ export default function Time4DController({
           if (prev >= 100) {
             return 0; // Loop back
           }
-          return Math.min(100, prev + 0.3 * playbackSpeed);
+          return Math.min(100, prev + 0.4 * playbackSpeed);
         });
       }, 50);
     }
@@ -148,9 +148,9 @@ export default function Time4DController({
             className="bg-transparent text-cyan-300 font-mono-sci text-xs font-semibold focus:outline-none cursor-pointer pr-1"
           >
             <option value={0.5} className="bg-[#051428] text-white">0.5x</option>
-            <option value={1} className="bg-[#051428] text-white">1x</option>
-            <option value={2} className="bg-[#051428] text-white">2x</option>
-            <option value={4} className="bg-[#051428] text-white">4x</option>
+            <option value={1} className="bg-[#051428] text-white">1.0x</option>
+            <option value={2} className="bg-[#051428] text-white">2.0x</option>
+            <option value={5} className="bg-[#051428] text-white">5.0x</option>
           </select>
         </div>
       </div>

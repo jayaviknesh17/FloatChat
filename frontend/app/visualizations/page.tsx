@@ -23,15 +23,7 @@ import {
   getVisualizationObservations,
 } from "@/lib/api";
 import {
-  Sparkles,
-  Sliders,
-  Maximize2,
-  Minimize2,
-  RefreshCw,
   PanelRightOpen,
-  PanelRightClose,
-  Radio,
-  Layers,
 } from "lucide-react";
 
 export default function VisualizationsPage() {
@@ -56,13 +48,13 @@ export default function VisualizationsPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isDataFetching, setIsDataFetching] = useState<boolean>(false);
 
-  // 3. 4D Timeline State
+  // 3. 4D Timeline State (Real ARGO Dataset range 2003-06-16 to 2026-05-25)
   const [timelineProgress, setTimelineProgress] = useState<number>(100); // 0 to 100
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [dateRange, setDateRange] = useState<{ start: string | null; end: string | null }>({
-    start: "2013-01-01T00:00:00Z",
-    end: "2025-06-30T23:59:59Z",
+    start: "2003-06-16T07:28:26Z",
+    end: "2026-05-25T15:56:48Z",
   });
 
   // 4. Layer & Filter Controls State
@@ -123,7 +115,7 @@ export default function VisualizationsPage() {
     };
   }, []);
 
-  // Fetch observations from real backend whenever region or active variable changes
+  // Fetch observations from real backend whenever region, variable, or anomaly toggle changes
   const fetchObservations = useCallback(async () => {
     setIsDataFetching(true);
     try {
@@ -166,8 +158,8 @@ export default function VisualizationsPage() {
     if (!observations || observations.length === 0) return [];
     if (timelineProgress >= 99.5) return observations;
 
-    const tStart = dateRange.start ? new Date(dateRange.start).getTime() : new Date("2013-01-01").getTime();
-    const tEnd = dateRange.end ? new Date(dateRange.end).getTime() : new Date("2025-06-30").getTime();
+    const tStart = dateRange.start ? new Date(dateRange.start).getTime() : new Date("2003-06-16").getTime();
+    const tEnd = dateRange.end ? new Date(dateRange.end).getTime() : new Date("2026-05-25").getTime();
     const cutoffTime = tStart + (timelineProgress / 100) * (tEnd - tStart);
 
     return observations.filter((o) => {

@@ -1,25 +1,20 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   ObservationPoint3D,
   FloatSummaryItem,
-  ProfileCycleSummary,
 } from "@/lib/types";
 import {
-  Compass,
   RotateCcw,
   ZoomIn,
   ZoomOut,
-  Layers,
   Sparkles,
-  Maximize2,
   Navigation,
   Globe,
   Waves,
-  Eye,
 } from "lucide-react";
 
 export type ActiveVariable =
@@ -47,6 +42,8 @@ export interface TrueOcean3DSceneProps {
 // Convert geographic lat/lon and depth into 3D Spherical coordinates
 const GLOBE_RADIUS = 26.0;
 const MAX_DEPTH_OFFSET = 2.4; // Max radial displacement for 2000m depth
+const MAX_OBS_INSTANCES = 15000;
+const MAX_FLOAT_INSTANCES = 100;
 
 export function latLonDepthToVector3(
   lat: number,
@@ -73,42 +70,41 @@ export function getVariableColor(
   variable: ActiveVariable,
   tempC?: number | null,
   salPsu?: number | null,
-  zScore?: number | null
+  zScore?: number | null,
+  targetColor: THREE.Color = new THREE.Color()
 ): THREE.Color {
-  const color = new THREE.Color();
-
   if (variable === "Temperature (°C)") {
     const t = tempC !== null && tempC !== undefined ? tempC : 20;
     // Scale: 4°C (Deep Blue) -> 12°C (Cyan) -> 18°C (Green) -> 24°C (Yellow/Amber) -> 30°C (Red)
-    if (t <= 6) color.setHex(0x1d4ed8);
-    else if (t <= 12) color.setHex(0x06b6d4);
-    else if (t <= 18) color.setHex(0x10b981);
-    else if (t <= 24) color.setHex(0xf59e0b);
-    else color.setHex(0xef4444);
+    if (t <= 6) targetColor.setHex(0x1d4ed8);
+    else if (t <= 12) targetColor.setHex(0x06b6d4);
+    else if (t <= 18) targetColor.setHex(0x10b981);
+    else if (t <= 24) targetColor.setHex(0xf59e0b);
+    else targetColor.setHex(0xef4444);
   } else if (variable === "Salinity (PSU)") {
     const s = salPsu !== null && salPsu !== undefined ? salPsu : 34.5;
     // Scale: <32.5 (Fresh/Sky Blue) -> 34.0 (Cyan) -> 35.0 (Mint) -> 36.0 (Orange) -> >36.5 (Crimson)
-    if (s <= 32.8) color.setHex(0x38bdf8);
-    else if (s <= 34.2) color.setHex(0x06b6d4);
-    else if (s <= 35.2) color.setHex(0x10b981);
-    else if (s <= 36.2) color.setHex(0xf59e0b);
-    else color.setHex(0xf43f5e);
+    if (s <= 32.8) targetColor.setHex(0x38bdf8);
+    else if (s <= 34.2) targetColor.setHex(0x06b6d4);
+    else if (s <= 35.2) targetColor.setHex(0x10b981);
+    else if (s <= 36.2) targetColor.setHex(0xf59e0b);
+    else targetColor.setHex(0xf43f5e);
   } else if (variable === "Temperature Anomaly") {
     const z = zScore !== null && zScore !== undefined ? zScore : 0;
-    if (z >= 2.0) color.setHex(0xef4444); // Strong warm anomaly
-    else if (z >= 1.0) color.setHex(0xf97316); // Moderate warm
-    else if (z <= -2.0) color.setHex(0x1e40af); // Strong cold anomaly
-    else if (z <= -1.0) color.setHex(0x0284c7); // Moderate cold
-    else color.setHex(0x10b981); // Normal baseline
+    if (z >= 2.0) targetColor.setHex(0xef4444); // Strong warm anomaly
+    else if (z >= 1.0) targetColor.setHex(0xf97316); // Moderate warm
+    else if (z <= -2.0) targetColor.setHex(0x1e40af); // Strong cold anomaly
+    else if (z <= -1.0) targetColor.setHex(0x0284c7); // Moderate cold
+    else targetColor.setHex(0x10b981); // Normal baseline
   } else {
     // Salinity Anomaly
     const z = zScore !== null && zScore !== undefined ? zScore : 0;
-    if (z >= 2.0) color.setHex(0xe11d48);
-    else if (z <= -2.0) color.setHex(0x0284c7);
-    else color.setHex(0x10b981);
+    if (z >= 2.0) targetColor.setHex(0xe11d48);
+    else if (z <= -2.0) targetColor.setHex(0x0284c7);
+    else targetColor.setHex(0x10b981);
   }
 
-  return color;
+  return targetColor;
 }
 
 export default function TrueOcean3DScene({
@@ -128,6 +124,7 @@ export default function TrueOcean3DScene({
 }: TrueOcean3DSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const compassNeedleRef = useRef<HTMLDivElement>(null);
 
   // Hovered observation / float state
   const [hoveredInfo, setHoveredInfo] = useState<{
@@ -144,34 +141,52 @@ export default function TrueOcean3DScene({
     screenPos: { x: number; y: number };
   } | null>(null);
 
-  // Camera azimuth and compass angle
-  const [compassHeading, setCompassHeading] = useState<number>(0);
-
   // Scene references to preserve across renders
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
-  const earthMeshRef = useRef<THREE.Mesh | null>(null);
   const cloudsMeshRef = useRef<THREE.Mesh | null>(null);
-  const dataGroupRef = useRef<THREE.Group | null>(null);
-  const depthGridGroupRef = useRef<THREE.Group | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
+  const transitionAnimIdRef = useRef<number | null>(null);
 
-  // Focus camera target coordinates
+  // GPU Instanced and Batched Mesh References
+  const obsInstancedMeshRef = useRef<THREE.InstancedMesh | null>(null);
+  const floatInstancedMeshRef = useRef<THREE.InstancedMesh | null>(null);
+  const haloInstancedMeshRef = useRef<THREE.InstancedMesh | null>(null);
+  const trajectoryLinesRef = useRef<THREE.LineSegments | null>(null);
+  const pillarLinesRef = useRef<THREE.LineSegments | null>(null);
+
+  // Mapping from instance index back to observation / float item for instant raycasting
+  const obsIndexMapRef = useRef<ObservationPoint3D[]>([]);
+  const floatIndexMapRef = useRef<FloatSummaryItem[]>([]);
+
+  // Reusable reusable Three.js math objects to avoid GC allocation in hot loops
+  const dummyRef = useRef<THREE.Object3D>(new THREE.Object3D());
+  const tempColorRef = useRef<THREE.Color>(new THREE.Color());
+  const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
+  const mouseCoordRef = useRef<THREE.Vector2>(new THREE.Vector2());
+  const lastRaycastTimeRef = useRef<number>(0);
+
+  // Smooth camera orientation transition
   const focusCameraOn = useCallback((lat: number, lon: number, distance: number = 55) => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     if (!camera || !controls) return;
 
+    if (transitionAnimIdRef.current) {
+      cancelAnimationFrame(transitionAnimIdRef.current);
+      transitionAnimIdRef.current = null;
+    }
+
     const targetPos = latLonDepthToVector3(lat, lon, 0, GLOBE_RADIUS);
     const cameraDir = targetPos.clone().normalize().multiplyScalar(distance);
 
-    // Smoothly animate controls target and camera position
     const startPos = camera.position.clone();
     const startTarget = controls.target.clone();
+    const destTarget = targetPos.clone().multiplyScalar(0.12);
     const startTime = performance.now();
-    const duration = 1200; // ms
+    const duration = 1000; // ms
 
     const animateTransition = (currentTime: number) => {
       const elapsed = currentTime - startTime;
@@ -180,18 +195,20 @@ export default function TrueOcean3DScene({
       const ease = 1 - Math.pow(1 - progress, 3);
 
       camera.position.lerpVectors(startPos, cameraDir, ease);
-      controls.target.lerpVectors(startTarget, targetPos.clone().multiplyScalar(0.2), ease);
+      controls.target.lerpVectors(startTarget, destTarget, ease);
       controls.update();
 
       if (progress < 1.0) {
-        requestAnimationFrame(animateTransition);
+        transitionAnimIdRef.current = requestAnimationFrame(animateTransition);
+      } else {
+        transitionAnimIdRef.current = null;
       }
     };
 
-    requestAnimationFrame(animateTransition);
+    transitionAnimIdRef.current = requestAnimationFrame(animateTransition);
   }, []);
 
-  // 1. Initialize Scene, Globe, Atmosphere, OrbitControls, and Lighting
+  // 1. Initialize Scene, Globe, Atmosphere, OrbitControls, and Lighting (ONCE)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -206,8 +223,8 @@ export default function TrueOcean3DScene({
     const height = container.clientHeight || 500;
 
     // 2. Camera setup - Positioned towards Indian Ocean (Lat ~12°N, Lon ~78°E)
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 1000);
-    const initialCamPos = latLonDepthToVector3(12.0, 78.0, 0, 58.0);
+    const camera = new THREE.PerspectiveCamera(42, Math.max(width / height, 0.1), 0.1, 1000);
+    const initialCamPos = latLonDepthToVector3(12.0, 78.0, 0, 56.0);
     camera.position.copy(initialCamPos);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
@@ -217,8 +234,9 @@ export default function TrueOcean3DScene({
       antialias: true,
       powerPreference: "high-performance",
       alpha: true,
+      depth: true,
     });
-    renderer.setSize(width, height);
+    renderer.setSize(width, height, false);
     renderer.setPixelRatio(Math.min(typeof window !== "undefined" ? window.devicePixelRatio : 1, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.35;
@@ -229,18 +247,22 @@ export default function TrueOcean3DScene({
     renderer.domElement.style.height = "100%";
     renderer.domElement.style.display = "block";
     renderer.domElement.style.outline = "none";
+    renderer.domElement.style.pointerEvents = "auto";
 
     container.innerHTML = "";
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // 4. OrbitControls (Smooth 360-degree rotation, pan, zoom)
+    // 4. Tuned OrbitControls (Smooth 360-degree rotation, pan, zoom within bounds)
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.06;
+    controls.dampingFactor = 0.05;
     controls.screenSpacePanning = true;
-    controls.minDistance = 32.0; // Zoom close enough for detailed underwater depth view
-    controls.maxDistance = 160.0;
+    controls.minDistance = 28.5; // Zoom safely near surface without entering Earth radius 26.0
+    controls.maxDistance = 110.0; // Prevent shrinking to a dot
+    controls.enableRotate = true;
+    controls.enableZoom = true;
+    controls.enablePan = true;
     controls.target.set(0, 0, 0);
     controlsRef.current = controls;
 
@@ -248,38 +270,29 @@ export default function TrueOcean3DScene({
     const ambientLight = new THREE.AmbientLight(0x1e3a5f, 2.2);
     scene.add(ambientLight);
 
-    // Directional Sun Light illuminating Indian Ocean & South Asia
     const sunLight = new THREE.DirectionalLight(0xffffff, 3.0);
     sunLight.position.set(40, 30, 50);
     scene.add(sunLight);
 
-    // Blue Rim Light giving oceanic atmosphere glow
     const rimLight = new THREE.DirectionalLight(0x38bdf8, 2.4);
     rimLight.position.set(-50, -20, -40);
     scene.add(rimLight);
 
-    // Secondary Equatorial Fill
     const fillLight = new THREE.DirectionalLight(0x0ea5e9, 1.4);
     fillLight.position.set(0, 50, 0);
     scene.add(fillLight);
 
-    // 6. Texture Loader with Fallback procedural Earth
+    // 6. Earth Sphere Geometry & Textures
     const textureLoader = new THREE.TextureLoader();
-
-    // Earth Sphere Geometry
     const earthGeo = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 64);
 
-    // Textures
     const earthTexture = textureLoader.load(
       "/assets/earth_blue_marble.jpg",
       () => {
         if (rendererRef.current) rendererRef.current.render(scene, camera);
       },
       undefined,
-      () => {
-        // Fallback procedural canvas texture if file load fails
-        console.warn("Using fallback procedural Earth map");
-      }
+      () => console.warn("Fallback Earth texture in use")
     );
     earthTexture.colorSpace = THREE.SRGBColorSpace;
 
@@ -297,7 +310,6 @@ export default function TrueOcean3DScene({
 
     const earthMesh = new THREE.Mesh(earthGeo, earthMat);
     scene.add(earthMesh);
-    earthMeshRef.current = earthMesh;
 
     // Atmosphere Glow Layer
     const atmosGeo = new THREE.SphereGeometry(GLOBE_RADIUS * 1.018, 64, 64);
@@ -325,17 +337,16 @@ export default function TrueOcean3DScene({
     scene.add(cloudsMesh);
     cloudsMeshRef.current = cloudsMesh;
 
-    // 7. Depth Reference Shells (0m, 500m, 1000m, 2000m Maximum Profile Depth)
+    // 7. Depth Reference Shells (0m, 500m, 1000m, 2000m)
     const depthGridGroup = new THREE.Group();
     const depthLevels = [
       { depth: 0, r: GLOBE_RADIUS, label: "0 m (Surface)", opacity: 0.12, color: 0x38bdf8 },
       { depth: 500, r: GLOBE_RADIUS - (500 / 2000) * MAX_DEPTH_OFFSET, label: "500 m", opacity: 0.08, color: 0x0ea5e9 },
       { depth: 1000, r: GLOBE_RADIUS - (1000 / 2000) * MAX_DEPTH_OFFSET, label: "1000 m", opacity: 0.08, color: 0x0284c7 },
-      { depth: 2000, r: GLOBE_RADIUS - MAX_DEPTH_OFFSET, label: "2000 m (Max Profile Depth)", opacity: 0.14, color: 0x1e3a5f },
+      { depth: 2000, r: GLOBE_RADIUS - MAX_DEPTH_OFFSET, label: "2000 m", opacity: 0.14, color: 0x1e3a5f },
     ];
 
     depthLevels.forEach((lvl) => {
-      // Create subtle longitude & latitude rings around the Northern Indian Ocean
       const ringGeo = new THREE.SphereGeometry(lvl.r, 32, 16, 0.9, 1.4, 1.1, 0.9);
       const ringMat = new THREE.MeshBasicMaterial({
         color: lvl.color,
@@ -344,51 +355,111 @@ export default function TrueOcean3DScene({
         opacity: lvl.opacity,
         depthWrite: false,
       });
-      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-      depthGridGroup.add(ringMesh);
+      depthGridGroup.add(new THREE.Mesh(ringGeo, ringMat));
     });
-
     scene.add(depthGridGroup);
-    depthGridGroupRef.current = depthGridGroup;
 
-    // 8. Data Group for Observation Points, Profiles, and Trajectories
-    const dataGroup = new THREE.Group();
-    scene.add(dataGroup);
-    dataGroupRef.current = dataGroup;
+    // 8. GPU InstancedMesh Initialization for Observations (Single Draw Call)
+    const obsGeo = new THREE.SphereGeometry(0.20, 8, 8);
+    const obsMat = new THREE.MeshStandardMaterial({
+      roughness: 0.35,
+      metalness: 0.15,
+      toneMapped: true,
+    });
+    const obsInstancedMesh = new THREE.InstancedMesh(obsGeo, obsMat, MAX_OBS_INSTANCES);
+    obsInstancedMesh.count = 0;
+    obsInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    obsInstancedMesh.userData = { type: "observations_instanced" };
+    scene.add(obsInstancedMesh);
+    obsInstancedMeshRef.current = obsInstancedMesh;
 
-    // 9. Resize handler
-    const handleResize = () => {
-      if (!container || !renderer || !camera) return;
-      const w = container.clientWidth || 800;
-      const h = container.clientHeight || 500;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
+    // 9. GPU InstancedMesh for Float Surface Markers
+    const floatGeo = new THREE.SphereGeometry(0.40, 12, 12);
+    const floatMat = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      emissive: 0x0284c7,
+      emissiveIntensity: 0.8,
+      roughness: 0.2,
+    });
+    const floatInstancedMesh = new THREE.InstancedMesh(floatGeo, floatMat, MAX_FLOAT_INSTANCES);
+    floatInstancedMesh.count = 0;
+    floatInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    floatInstancedMesh.userData = { type: "floats_instanced" };
+    scene.add(floatInstancedMesh);
+    floatInstancedMeshRef.current = floatInstancedMesh;
 
-    window.addEventListener("resize", handleResize);
+    // 10. GPU InstancedMesh for Float Halos
+    const haloGeo = new THREE.RingGeometry(0.5, 0.78, 24);
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0x22d3ee,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.65,
+      depthWrite: false,
+    });
+    const haloInstancedMesh = new THREE.InstancedMesh(haloGeo, haloMat, MAX_FLOAT_INSTANCES);
+    haloInstancedMesh.count = 0;
+    haloInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(haloInstancedMesh);
+    haloInstancedMeshRef.current = haloInstancedMesh;
 
-    // 10. Animation render loop
-    let lastHeadingUpdate = 0;
+    // 11. Batched LineSegments for Trajectories & Depth Pillars
+    const trajMat = new THREE.LineBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.75,
+      vertexColors: true,
+    });
+    const trajGeo = new THREE.BufferGeometry();
+    const trajectoryLines = new THREE.LineSegments(trajGeo, trajMat);
+    scene.add(trajectoryLines);
+    trajectoryLinesRef.current = trajectoryLines;
+
+    const pillarMat = new THREE.LineBasicMaterial({
+      color: 0x0ea5e9,
+      transparent: true,
+      opacity: 0.35,
+      vertexColors: true,
+    });
+    const pillarGeo = new THREE.BufferGeometry();
+    const pillarLines = new THREE.LineSegments(pillarGeo, pillarMat);
+    scene.add(pillarLines);
+    pillarLinesRef.current = pillarLines;
+
+    // 12. ResizeObserver for Deterministic Canvas Sizing (No stretching or overflow)
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = Math.floor(entry.contentRect.width);
+        const h = Math.floor(entry.contentRect.height);
+        if (w > 0 && h > 0 && camera && renderer) {
+          camera.aspect = w / h;
+          camera.updateProjectionMatrix();
+          renderer.setSize(w, h, false);
+        }
+      }
+    });
+    resizeObserver.observe(container);
+
+    // 13. High-Performance Render Loop (Zero React Re-renders inside loop)
+    let lastCompassUpdate = 0;
+    const dirVector = new THREE.Vector3();
 
     const animate = (time: number) => {
       animFrameIdRef.current = requestAnimationFrame(animate);
 
       controls.update();
 
-      // Subtle slow rotation of cloud layer
+      // Slow cloud movement
       if (cloudsMesh) {
-        cloudsMesh.rotation.y = time * 0.00004;
+        cloudsMesh.rotation.y = time * 0.00003;
       }
 
-      // Update Compass Heading every 100ms
-      if (time - lastHeadingUpdate > 100 && camera) {
-        lastHeadingUpdate = time;
-        const dir = new THREE.Vector3();
-        camera.getWorldDirection(dir);
-        // Calculate azimuth angle relative to North pole
-        const angleDeg = Math.round((Math.atan2(dir.x, dir.z) * 180) / Math.PI);
-        setCompassHeading(angleDeg);
+      // Update Compass Needle via Direct DOM transform (Zero React State Thrashing)
+      if (time - lastCompassUpdate > 80 && camera && compassNeedleRef.current) {
+        lastCompassUpdate = time;
+        camera.getWorldDirection(dirVector);
+        const angleDeg = Math.round((Math.atan2(dirVector.x, dirVector.z) * 180) / Math.PI);
+        compassNeedleRef.current.style.transform = `rotate(${-angleDeg}deg)`;
       }
 
       renderer.render(scene, camera);
@@ -397,199 +468,216 @@ export default function TrueOcean3DScene({
     animFrameIdRef.current = requestAnimationFrame(animate);
 
     return () => {
-      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
+      if (transitionAnimIdRef.current) cancelAnimationFrame(transitionAnimIdRef.current);
       controls.dispose();
       renderer.dispose();
-      if (container && renderer.domElement) {
+      if (container) {
         container.innerHTML = "";
       }
     };
   }, []);
 
-  // 2. Render Real ARGO Float Markers, Trajectories, and Discrete CTD Depth Observations
+  // 2. High-Performance Instanced GPU Buffer Synchronization
   useEffect(() => {
-    const dataGroup = dataGroupRef.current;
-    if (!dataGroup) return;
+    const obsInstanced = obsInstancedMeshRef.current;
+    const floatInstanced = floatInstancedMeshRef.current;
+    const haloInstanced = haloInstancedMeshRef.current;
+    const trajectoryLines = trajectoryLinesRef.current;
+    const pillarLines = pillarLinesRef.current;
+    const dummy = dummyRef.current;
+    const tempColor = tempColorRef.current;
 
-    // Clear previous children and dispose geometries/materials
-    while (dataGroup.children.length > 0) {
-      const child = dataGroup.children[0];
-      dataGroup.remove(child);
-      if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
-        child.geometry?.dispose();
-        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
-        else child.material?.dispose();
-      }
-    }
-
-    if (!observations || observations.length === 0) return;
+    if (!obsInstanced || !floatInstanced || !haloInstanced || !trajectoryLines || !pillarLines) return;
 
     const [minDepth, maxDepth] = depthRange;
 
-    // Group observations by float_id
-    const floatGroups = new Map<string, ObservationPoint3D[]>();
-    for (const obs of observations) {
+    // --- A. Populate Observations InstancedMesh (1 Draw Call for 5,000+ points) ---
+    const visibleObservations: ObservationPoint3D[] = [];
+    let obsCount = 0;
+
+    for (let i = 0; i < observations.length; i++) {
+      if (obsCount >= MAX_OBS_INSTANCES) break;
+      const obs = observations[i];
       if (obs.depth_m < minDepth || obs.depth_m > maxDepth) continue;
-      if (!floatGroups.has(obs.float_id)) {
-        floatGroups.set(obs.float_id, []);
-      }
-      floatGroups.get(obs.float_id)!.push(obs);
-    }
 
-    // 1. Render Float Surface Markers and Status Halos
-    if (showPositions) {
-      floats.forEach((f) => {
-        const isSelected = f.float_id === selectedFloatId;
-        const pos = latLonDepthToVector3(f.latest_latitude, f.latest_longitude, 0, GLOBE_RADIUS + 0.12);
+      const isAnom = obs.is_anomaly || (obs.z_score !== null && Math.abs(obs.z_score || 0) >= 2.0);
+      if (showAnomalies && !isAnom) continue;
 
-        // Core marker
-        const markerGeo = new THREE.SphereGeometry(isSelected ? 0.48 : 0.32, 16, 16);
-        const markerMat = new THREE.MeshStandardMaterial({
-          color: isSelected ? 0x22d3ee : 0x38bdf8,
-          emissive: isSelected ? 0x06b6d4 : 0x0284c7,
-          emissiveIntensity: isSelected ? 1.8 : 0.8,
-          roughness: 0.2,
-        });
-        const markerMesh = new THREE.Mesh(markerGeo, markerMat);
-        markerMesh.position.copy(pos);
-        markerMesh.userData = { type: "float", floatId: f.float_id, float: f };
-        dataGroup.add(markerMesh);
-
-        // Outer pulsating halo for selected or active float
-        const haloGeo = new THREE.RingGeometry(isSelected ? 0.6 : 0.4, isSelected ? 0.85 : 0.55, 32);
-        const haloMat = new THREE.MeshBasicMaterial({
-          color: isSelected ? 0x22d3ee : 0x0ea5e9,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: isSelected ? 0.85 : 0.45,
-        });
-        const haloMesh = new THREE.Mesh(haloGeo, haloMat);
-        haloMesh.position.copy(pos);
-        haloMesh.lookAt(pos.clone().multiplyScalar(2));
-        dataGroup.add(haloMesh);
-      });
-    }
-
-    // 2. Render Chronological Float Trajectories
-    if (showTrajectories) {
-      floatGroups.forEach((obsList, floatId) => {
-        const isSelected = floatId === selectedFloatId;
-
-        // Group by cycle to get unique surface points for trajectory
-        const cycleMap = new Map<number, ObservationPoint3D>();
-        obsList.forEach((o) => {
-          if (!cycleMap.has(o.cycle_number)) {
-            cycleMap.set(o.cycle_number, o);
-          }
-        });
-
-        const sortedCycles = Array.from(cycleMap.values()).sort((a, b) => a.cycle_number - b.cycle_number);
-
-        if (sortedCycles.length > 1) {
-          const points = sortedCycles.map((c) =>
-            latLonDepthToVector3(c.latitude, c.longitude, 0, GLOBE_RADIUS + 0.05)
-          );
-
-          const curve = new THREE.CatmullRomCurve3(points);
-          const curvePoints = curve.getPoints(Math.max(points.length * 4, 20));
-          const lineGeo = new THREE.BufferGeometry().setFromPoints(curvePoints);
-          const lineMat = new THREE.LineBasicMaterial({
-            color: isSelected ? 0x38bdf8 : 0x0369a1,
-            linewidth: isSelected ? 3 : 1,
-            transparent: true,
-            opacity: isSelected ? 0.95 : 0.55,
-          });
-          const lineMesh = new THREE.Line(lineGeo, lineMat);
-          dataGroup.add(lineMesh);
-        }
-      });
-    }
-
-    // 3. Render Discrete Vertical CTD Depth Observation Columns
-    // Group observations by (float_id, cycle_number) to form vertical profile pillars
-    const profileGroups = new Map<string, ObservationPoint3D[]>();
-    for (const obs of observations) {
-      if (obs.depth_m < minDepth || obs.depth_m > maxDepth) continue;
-      const key = `${obs.float_id}_${obs.cycle_number}`;
-      if (!profileGroups.has(key)) {
-        profileGroups.set(key, []);
-      }
-      profileGroups.get(key)!.push(obs);
-    }
-
-    profileGroups.forEach((cycleObs, key) => {
-      const isSelectedFloat = cycleObs[0].float_id === selectedFloatId;
+      const isSelectedFloat = obs.float_id === selectedFloatId;
       const isSelectedCycle =
         isSelectedFloat && selectedCycleNumber !== null && selectedCycleNumber !== undefined
-          ? cycleObs[0].cycle_number === selectedCycleNumber
+          ? obs.cycle_number === selectedCycleNumber
           : isSelectedFloat;
 
-      // Draw subtle vertical pillar connecting surface down to max measured depth
-      cycleObs.sort((a, b) => a.depth_m - b.depth_m);
-      if (cycleObs.length > 1) {
-        const topPoint = latLonDepthToVector3(cycleObs[0].latitude, cycleObs[0].longitude, cycleObs[0].depth_m);
-        const bottomPoint = latLonDepthToVector3(
-          cycleObs[0].latitude,
-          cycleObs[0].longitude,
-          cycleObs[cycleObs.length - 1].depth_m
-        );
+      const pos = latLonDepthToVector3(obs.latitude, obs.longitude, obs.depth_m);
+      dummy.position.copy(pos);
 
-        const pillarGeo = new THREE.BufferGeometry().setFromPoints([topPoint, bottomPoint]);
-        const pillarMat = new THREE.LineBasicMaterial({
-          color: isSelectedCycle ? 0x38bdf8 : 0x0284c7,
-          transparent: true,
-          opacity: isSelectedCycle ? 0.75 : 0.25,
-        });
-        const pillarLine = new THREE.Line(pillarGeo, pillarMat);
-        dataGroup.add(pillarLine);
+      const scale = isAnom ? 1.4 : isSelectedCycle ? 1.15 : 0.8;
+      dummy.scale.set(scale, scale, scale);
+      dummy.updateMatrix();
+
+      obsInstanced.setMatrixAt(obsCount, dummy.matrix);
+
+      getVariableColor(activeVariable, obs.temperature_c, obs.salinity_psu, obs.z_score, tempColor);
+      if (isSelectedCycle) {
+        tempColor.offsetHSL(0, 0, 0.15); // Slightly brighter for selected profile
+      }
+      obsInstanced.setColorAt(obsCount, tempColor);
+
+      visibleObservations.push(obs);
+      obsCount++;
+    }
+
+    obsInstanced.count = obsCount;
+    obsInstanced.instanceMatrix.needsUpdate = true;
+    if (obsInstanced.instanceColor) obsInstanced.instanceColor.needsUpdate = true;
+    obsIndexMapRef.current = visibleObservations;
+
+    // --- B. Populate Float Surface Markers & Halos InstancedMesh ---
+    const visibleFloats: FloatSummaryItem[] = [];
+    let floatCount = 0;
+
+    if (showPositions && floats && floats.length > 0) {
+      for (let i = 0; i < floats.length; i++) {
+        if (floatCount >= MAX_FLOAT_INSTANCES) break;
+        const f = floats[i];
+        const isSelected = f.float_id === selectedFloatId;
+        const pos = latLonDepthToVector3(f.latest_latitude, f.latest_longitude, 0, GLOBE_RADIUS + 0.14);
+
+        dummy.position.copy(pos);
+        const scale = isSelected ? 1.35 : 0.9;
+        dummy.scale.set(scale, scale, scale);
+        dummy.updateMatrix();
+
+        floatInstanced.setMatrixAt(floatCount, dummy.matrix);
+        tempColor.setHex(isSelected ? 0x22d3ee : 0x38bdf8);
+        floatInstanced.setColorAt(floatCount, tempColor);
+
+        // Halo orientation matching radial surface normal
+        dummy.lookAt(pos.clone().multiplyScalar(2));
+        dummy.scale.set(isSelected ? 1.25 : 0.85, isSelected ? 1.25 : 0.85, 1);
+        dummy.updateMatrix();
+        haloInstanced.setMatrixAt(floatCount, dummy.matrix);
+
+        visibleFloats.push(f);
+        floatCount++;
+      }
+    }
+
+    floatInstanced.count = floatCount;
+    floatInstanced.instanceMatrix.needsUpdate = true;
+    if (floatInstanced.instanceColor) floatInstanced.instanceColor.needsUpdate = true;
+
+    haloInstanced.count = floatCount;
+    haloInstanced.instanceMatrix.needsUpdate = true;
+    floatIndexMapRef.current = visibleFloats;
+
+    // --- C. Batched Trajectory Line Segments ---
+    if (showTrajectories && observations.length > 0) {
+      const trajPositions: number[] = [];
+      const trajColors: number[] = [];
+
+      // Group by float_id -> unique cycle surface points
+      const floatCyclesMap = new Map<string, Map<number, ObservationPoint3D>>();
+      for (let i = 0; i < observations.length; i++) {
+        const o = observations[i];
+        if (!floatCyclesMap.has(o.float_id)) {
+          floatCyclesMap.set(o.float_id, new Map());
+        }
+        const cMap = floatCyclesMap.get(o.float_id)!;
+        if (!cMap.has(o.cycle_number) || o.depth_m < cMap.get(o.cycle_number)!.depth_m) {
+          cMap.set(o.cycle_number, o);
+        }
       }
 
-      // Discrete observation level spheres
-      cycleObs.forEach((obs) => {
-        const pos = latLonDepthToVector3(obs.latitude, obs.longitude, obs.depth_m);
-        const col = getVariableColor(activeVariable, obs.temperature_c, obs.salinity_psu, obs.z_score);
+      floatCyclesMap.forEach((cyclesMap, fid) => {
+        const sortedCycles = Array.from(cyclesMap.values()).sort((a, b) => a.cycle_number - b.cycle_number);
+        if (sortedCycles.length > 1) {
+          const isSelected = fid === selectedFloatId;
+          const r = isSelected ? 0.22 : 0.02;
+          const g = isSelected ? 0.83 : 0.45;
+          const b = isSelected ? 0.97 : 0.75;
 
-        const isAnom = obs.is_anomaly || (obs.z_score !== null && Math.abs(obs.z_score || 0) >= 2.0);
+          for (let k = 0; k < sortedCycles.length - 1; k++) {
+            const p1 = latLonDepthToVector3(sortedCycles[k].latitude, sortedCycles[k].longitude, 0, GLOBE_RADIUS + 0.06);
+            const p2 = latLonDepthToVector3(sortedCycles[k + 1].latitude, sortedCycles[k + 1].longitude, 0, GLOBE_RADIUS + 0.06);
 
-        if (showAnomalies && !isAnom) {
-          // In anomaly-focus mode, dim non-anomalies
-          col.setHex(0x1e293b);
-        }
-
-        const pointSize = isAnom ? 0.28 : isSelectedCycle ? 0.20 : 0.14;
-        const pointGeo = new THREE.SphereGeometry(pointSize, 10, 10);
-        const pointMat = new THREE.MeshStandardMaterial({
-          color: col,
-          emissive: col,
-          emissiveIntensity: isAnom ? 2.2 : isSelectedCycle ? 1.2 : 0.4,
-          roughness: 0.3,
-        });
-
-        const pointMesh = new THREE.Mesh(pointGeo, pointMat);
-        pointMesh.position.copy(pos);
-        pointMesh.userData = { type: "observation", observation: obs };
-        dataGroup.add(pointMesh);
-
-        // Warning pulsating ring for anomalies
-        if (isAnom && (activeVariable === "Temperature Anomaly" || showAnomalies)) {
-          const anomRingGeo = new THREE.RingGeometry(0.35, 0.48, 16);
-          const anomRingMat = new THREE.MeshBasicMaterial({
-            color: 0xef4444,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.85,
-          });
-          const anomRingMesh = new THREE.Mesh(anomRingGeo, anomRingMat);
-          anomRingMesh.position.copy(pos);
-          anomRingMesh.lookAt(pos.clone().multiplyScalar(2));
-          dataGroup.add(anomRingMesh);
+            trajPositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+            trajColors.push(r, g, b, r, g, b);
+          }
         }
       });
-    });
-  }, [observations, floats, selectedFloatId, selectedCycleNumber, activeVariable, showTrajectories, showPositions, showAnomalies, depthRange]);
 
-  // 3. Region Focus changes
+      trajectoryLines.geometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(trajPositions, 3)
+      );
+      trajectoryLines.geometry.setAttribute(
+        "color",
+        new THREE.Float32BufferAttribute(trajColors, 3)
+      );
+      trajectoryLines.geometry.computeBoundingSphere();
+      trajectoryLines.visible = true;
+    } else {
+      trajectoryLines.visible = false;
+    }
+
+    // --- D. Batched Vertical CTD Profile Pillars ---
+    const pillarPositions: number[] = [];
+    const pillarColors: number[] = [];
+
+    const cycleDepthBounds = new Map<string, { top: ObservationPoint3D; bottom: ObservationPoint3D }>();
+    for (let i = 0; i < observations.length; i++) {
+      const o = observations[i];
+      if (o.depth_m < minDepth || o.depth_m > maxDepth) continue;
+      const key = `${o.float_id}_${o.cycle_number}`;
+      if (!cycleDepthBounds.has(key)) {
+        cycleDepthBounds.set(key, { top: o, bottom: o });
+      } else {
+        const b = cycleDepthBounds.get(key)!;
+        if (o.depth_m < b.top.depth_m) b.top = o;
+        if (o.depth_m > b.bottom.depth_m) b.bottom = o;
+      }
+    }
+
+    cycleDepthBounds.forEach((b, key) => {
+      if (b.top.depth_m !== b.bottom.depth_m) {
+        const isSelected = b.top.float_id === selectedFloatId;
+        const p1 = latLonDepthToVector3(b.top.latitude, b.top.longitude, b.top.depth_m);
+        const p2 = latLonDepthToVector3(b.bottom.latitude, b.bottom.longitude, b.bottom.depth_m);
+
+        pillarPositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+        const colR = isSelected ? 0.22 : 0.04;
+        const colG = isSelected ? 0.74 : 0.40;
+        const colB = isSelected ? 0.97 : 0.70;
+        pillarColors.push(colR, colG, colB, colR, colG, colB);
+      }
+    });
+
+    pillarLines.geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(pillarPositions, 3)
+    );
+    pillarLines.geometry.setAttribute(
+      "color",
+      new THREE.Float32BufferAttribute(pillarColors, 3)
+    );
+    pillarLines.geometry.computeBoundingSphere();
+  }, [
+    observations,
+    floats,
+    selectedFloatId,
+    selectedCycleNumber,
+    activeVariable,
+    showTrajectories,
+    showPositions,
+    showAnomalies,
+    depthRange,
+  ]);
+
+  // 3. Region Focus Changes (Smooth Camera Transition)
   useEffect(() => {
     if (!selectedRegion) return;
     const r = selectedRegion.toLowerCase();
@@ -605,102 +693,123 @@ export default function TrueOcean3DScene({
     }
   }, [selectedRegion, focusCameraOn]);
 
-  // 4. Focus on selected float when changed
+  // 4. Smooth Focus on Selected Float
   useEffect(() => {
-    if (!selectedFloatId) return;
+    if (!selectedFloatId || !floats) return;
     const match = floats.find((f) => f.float_id === selectedFloatId);
     if (match) {
       focusCameraOn(match.latest_latitude, match.latest_longitude, 42.0);
     }
   }, [selectedFloatId, floats, focusCameraOn]);
 
-  // 5. Interactive Raycaster for Hover Tooltip & Click Selection
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  // 5. Throttled Pointer Move & Raycaster for Fast Tooltip (30ms debounce)
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const now = performance.now();
+    if (now - lastRaycastTimeRef.current < 30) return; // 30ms throttle
+    lastRaycastTimeRef.current = now;
+
     const container = containerRef.current;
     const camera = cameraRef.current;
-    const dataGroup = dataGroupRef.current;
-    if (!container || !camera || !dataGroup) return;
+    const floatMesh = floatInstancedMeshRef.current;
+    const obsMesh = obsInstancedMeshRef.current;
+    if (!container || !camera || !floatMesh || !obsMesh) return;
 
     const rect = container.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    mouseCoordRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouseCoordRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+    raycasterRef.current.setFromCamera(mouseCoordRef.current, camera);
 
-    const intersects = raycaster.intersectObjects(dataGroup.children, false);
+    // 1. Check Float surface markers first (highest priority)
+    if (floatMesh.count > 0) {
+      const floatIntersects = raycasterRef.current.intersectObject(floatMesh);
+      if (floatIntersects.length > 0 && floatIntersects[0].instanceId !== undefined) {
+        const f = floatIndexMapRef.current[floatIntersects[0].instanceId];
+        if (f) {
+          setHoveredInfo({
+            floatId: f.float_id,
+            cycleNumber: f.profile_count,
+            lat: f.latest_latitude,
+            lon: f.latest_longitude,
+            time: f.last_observation,
+            screenPos: { x: e.clientX - rect.left, y: e.clientY - rect.top },
+          });
+          return;
+        }
+      }
+    }
 
-    if (intersects.length > 0) {
-      const hit = intersects[0].object;
-      const uData = hit.userData;
-
-      if (uData.type === "observation" && uData.observation) {
-        const o = uData.observation as ObservationPoint3D;
-        setHoveredInfo({
-          floatId: o.float_id,
-          cycleNumber: o.cycle_number,
-          depthM: o.depth_m,
-          tempC: o.temperature_c,
-          salPsu: o.salinity_psu,
-          zScore: o.z_score,
-          isAnomaly: o.is_anomaly,
-          lat: o.latitude,
-          lon: o.longitude,
-          time: o.timestamp,
-          screenPos: { x: e.clientX - rect.left, y: e.clientY - rect.top },
-        });
-        return;
-      } else if (uData.type === "float" && uData.float) {
-        const f = uData.float as FloatSummaryItem;
-        setHoveredInfo({
-          floatId: f.float_id,
-          cycleNumber: f.profile_count,
-          lat: f.latest_latitude,
-          lon: f.latest_longitude,
-          time: f.last_observation,
-          screenPos: { x: e.clientX - rect.left, y: e.clientY - rect.top },
-        });
-        return;
+    // 2. Check Observation 3D Points InstancedMesh
+    if (obsMesh.count > 0) {
+      const obsIntersects = raycasterRef.current.intersectObject(obsMesh);
+      if (obsIntersects.length > 0 && obsIntersects[0].instanceId !== undefined) {
+        const obs = obsIndexMapRef.current[obsIntersects[0].instanceId];
+        if (obs) {
+          setHoveredInfo({
+            floatId: obs.float_id,
+            cycleNumber: obs.cycle_number,
+            depthM: obs.depth_m,
+            tempC: obs.temperature_c,
+            salPsu: obs.salinity_psu,
+            zScore: obs.z_score,
+            isAnomaly: obs.is_anomaly,
+            lat: obs.latitude,
+            lon: obs.longitude,
+            time: obs.timestamp,
+            screenPos: { x: e.clientX - rect.left, y: e.clientY - rect.top },
+          });
+          return;
+        }
       }
     }
 
     setHoveredInfo(null);
-  };
+  }, []);
 
-  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // 6. Click Selection
+  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const container = containerRef.current;
     const camera = cameraRef.current;
-    const dataGroup = dataGroupRef.current;
-    if (!container || !camera || !dataGroup) return;
+    const floatMesh = floatInstancedMeshRef.current;
+    const obsMesh = obsInstancedMeshRef.current;
+    if (!container || !camera || !floatMesh || !obsMesh) return;
 
     const rect = container.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    mouseCoordRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouseCoordRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+    raycasterRef.current.setFromCamera(mouseCoordRef.current, camera);
 
-    const intersects = raycaster.intersectObjects(dataGroup.children, false);
-
-    if (intersects.length > 0) {
-      const hit = intersects[0].object;
-      const uData = hit.userData;
-
-      if (uData.type === "observation" && uData.observation) {
-        const o = uData.observation as ObservationPoint3D;
-        onSelectFloat(o.float_id, o.cycle_number, o);
-      } else if (uData.type === "float" && uData.float) {
-        const f = uData.float as FloatSummaryItem;
-        onSelectFloat(f.float_id);
+    // Click Float Marker
+    if (floatMesh.count > 0) {
+      const floatIntersects = raycasterRef.current.intersectObject(floatMesh);
+      if (floatIntersects.length > 0 && floatIntersects[0].instanceId !== undefined) {
+        const f = floatIndexMapRef.current[floatIntersects[0].instanceId];
+        if (f) {
+          onSelectFloat(f.float_id);
+          return;
+        }
       }
     }
-  };
+
+    // Click Observation Point
+    if (obsMesh.count > 0) {
+      const obsIntersects = raycasterRef.current.intersectObject(obsMesh);
+      if (obsIntersects.length > 0 && obsIntersects[0].instanceId !== undefined) {
+        const obs = obsIndexMapRef.current[obsIntersects[0].instanceId];
+        if (obs) {
+          onSelectFloat(obs.float_id, obs.cycle_number, obs);
+          return;
+        }
+      }
+    }
+  }, [onSelectFloat]);
 
   // Reset to default Indian Ocean View
-  const handleResetCamera = () => {
-    focusCameraOn(12.0, 78.0, 58.0);
+  const handleResetCamera = useCallback(() => {
+    focusCameraOn(12.0, 78.0, 56.0);
     if (onResetView) onResetView();
-  };
+  }, [focusCameraOn, onResetView]);
 
   return (
     <div
@@ -765,8 +874,8 @@ export default function TrueOcean3DScene({
           className="w-10 h-10 rounded-xl bg-[#031124]/90 backdrop-blur-md border border-cyan-500/30 flex items-center justify-center text-cyan-300 shadow-xl hover:border-cyan-400 hover:text-white transition-all group"
         >
           <div
-            className="transition-transform duration-200 flex items-center justify-center"
-            style={{ transform: `rotate(${-compassHeading}deg)` }}
+            ref={compassNeedleRef}
+            className="transition-transform duration-75 flex items-center justify-center"
           >
             <Navigation className="w-5 h-5 text-cyan-400 group-hover:scale-110 fill-cyan-400/20" />
           </div>
@@ -777,8 +886,11 @@ export default function TrueOcean3DScene({
           <button
             onClick={() => {
               if (controlsRef.current && cameraRef.current) {
-                cameraRef.current.position.multiplyScalar(0.85);
-                controlsRef.current.update();
+                const newPos = cameraRef.current.position.clone().multiplyScalar(0.85);
+                if (newPos.length() >= 28.5) {
+                  cameraRef.current.position.copy(newPos);
+                  controlsRef.current.update();
+                }
               }
             }}
             title="Zoom In"
@@ -789,8 +901,11 @@ export default function TrueOcean3DScene({
           <button
             onClick={() => {
               if (controlsRef.current && cameraRef.current) {
-                cameraRef.current.position.multiplyScalar(1.15);
-                controlsRef.current.update();
+                const newPos = cameraRef.current.position.clone().multiplyScalar(1.15);
+                if (newPos.length() <= 110.0) {
+                  cameraRef.current.position.copy(newPos);
+                  controlsRef.current.update();
+                }
               }
             }}
             title="Zoom Out"
@@ -815,7 +930,7 @@ export default function TrueOcean3DScene({
           <span>Underwater 3D Space: 0m → 2000m (Max Profile Depth)</span>
         </div>
         <div className="text-[9px] text-slate-400 font-mono-sci pl-1">
-          Drag to rotate 360° • Scroll to zoom • Double click float to inspect
+          Drag to rotate 360° • Scroll to zoom • Click float or CTD point to inspect
         </div>
       </div>
 
