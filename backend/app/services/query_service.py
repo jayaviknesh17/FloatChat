@@ -29,8 +29,19 @@ from backend.app.models.visualization_schema import (
     FloatSummaryResponse,
     RegionSummaryItem,
     RegionSummaryResponse,
+    RegionListResponse,
+    FloatDetailResponse,
+    ProfileCycleSummary,
+    FloatProfileListResponse,
+    ObservationPoint3D,
+    Observations3DResponse,
+    AnomalyDetailItem,
+    AnomalyListResponse,
+    ProfileLevelVisual,
+    ProfileVisualAnalysisResponse,
+    ProvenanceDetailResponse,
 )
-from backend.app.analysis.anomaly_detector import detect_anomalies
+from backend.app.analysis.anomaly_detector import detect_anomalies, extract_month_from_iso, get_depth_band
 
 from backend.app.analysis.thermocline import detect_thermocline
 from backend.app.analysis.salinity_gradient import detect_salinity_gradient
@@ -1040,5 +1051,616 @@ class QueryService:
         self._region_summaries_timestamp = now
         return resp, db_latency_ms, total_latency_ms
 
+    def get_visualization_regions(self) -> Tuple[RegionListResponse, float, float]:
+        """Retrieve oceanographic region boundaries and 3D globe focus coordinates."""
+        start_total = time.perf_counter()
+        db_start = time.perf_counter()
+
+        regions_meta = [
+            {
+                "region_id": "bay_of_bengal",
+                "name": "Bay of Bengal",
+                "description": "Northeastern Indian Ocean basin characterized by massive monsoonal freshwater influx, intense salinity stratification, and barrier layer dynamics.",
+                "bounds": {"lat_min": 5.0, "lat_max": 23.0, "lon_min": 80.0, "lon_max": 95.0},
+                "camera_target": {"lat": 13.5, "lon": 88.0, "zoom": 1.8},
+                "db_pattern": "%Bay of Bengal%"
+            },
+            {
+                "region_id": "arabian_sea",
+                "name": "Arabian Sea",
+                "description": "Northwestern Indian Ocean basin marked by high evaporation, elevated practical salinity (>36 PSU), and strong seasonal upwelling during southwest monsoon.",
+                "bounds": {"lat_min": 5.0, "lat_max": 25.0, "lon_min": 55.0, "lon_max": 77.5},
+                "camera_target": {"lat": 15.0, "lon": 66.0, "zoom": 1.8},
+                "db_pattern": "%Arabian Sea%"
+            },
+            {
+                "region_id": "indian_ocean",
+                "name": "Northern Indian Ocean",
+                "description": "Combined tropical basin comprising Arabian Sea, Bay of Bengal, and equatorial current system with high ocean heat content.",
+                "bounds": {"lat_min": -5.0, "lat_max": 25.0, "lon_min": 50.0, "lon_max": 100.0},
+                "camera_target": {"lat": 10.0, "lon": 78.0, "zoom": 1.4},
+                "db_pattern": "%"
+            },
+            {
+                "region_id": "global",
+                "name": "Global Ocean Array",
+                "description": "Full Indian Ocean view showing surrounding Asian, African, and Australian coastlines and ARGO float distributions.",
+                "bounds": {"lat_min": -35.0, "lat_max": 30.0, "lon_min": 30.0, "lon_max": 120.0},
+                "camera_target": {"lat": 8.0, "lon": 78.0, "zoom": 1.0},
+                "db_pattern": "%"
+            }
+        ]
+
+        regions_list = []
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for r in regions_meta:
+                cursor.execute("""
+                    SELECT COUNT(*), SUM(observation_count), MIN(first_observation), MAX(last_observation)
+                    FROM argo_float_summary
+                    WHERE region LIKE ?
+                """, (r["db_pattern"],))
+                row = cursor.fetchone()
+                f_count = row[0] if row and row[0] else 0
+                obs_count = row[1] if row and row[1] else 0
+                d_start = row[2] if row and row[2] else None
+                d_end = row[3] if row and row[3] else None
+
+                regions_list.append(RegionSummaryItem(
+                    region_id=r["region_id"],
+                    name=r["name"],
+                    description=r["description"],
+                    float_count=f_count,
+                    observation_count=obs_count,
+                    date_range={"start": d_start, "end": d_end},
+                    bounds=r["bounds"],
+                    camera_target=r["camera_target"]
+                ))
+
+        db_end = time.perf_counter()
+        db_latency_ms = round((db_end - db_start) * 1000, 3)
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        resp = RegionListResponse(
+            region_count=len(regions_list),
+            regions=regions_list,
+            total_latency_ms=total_latency_ms
+        )
+        return resp, db_latency_ms, total_latency_ms
+
+    def get_visualization_float_detail(self, float_id: str) -> Tuple[Optional[FloatDetailResponse], float, float]:
+        """Retrieve detailed metadata and spatial coverage for a specific float."""
+        start_total = time.perf_counter()
+        db_start = time.perf_counter()
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT region, MIN(profile_time) as first_obs, MAX(profile_time) as last_obs,
+                       COUNT(*) as total_obs, COUNT(DISTINCT cycle_number) as total_cycles,
+                       MIN(depth_m) as min_depth, MAX(depth_m) as max_depth,
+                       MIN(latitude) as lat_min, MAX(latitude) as lat_max,
+                       MIN(longitude) as lon_min, MAX(longitude) as lon_max,
+                       source_file
+                FROM argo_observations
+                WHERE float_id = ?
+                GROUP BY float_id
+            """, (float_id.strip(),))
+            row = cursor.fetchone()
+
+            if not row:
+                return None, 0.0, round((time.perf_counter() - start_total) * 1000, 3)
+
+            cursor.execute("""
+                SELECT latitude, longitude, cycle_number, profile_time
+                FROM argo_observations
+                WHERE float_id = ?
+                ORDER BY profile_time DESC
+                LIMIT 1
+            """, (float_id.strip(),))
+            latest_loc = cursor.fetchone()
+
+        db_end = time.perf_counter()
+        db_latency_ms = round((db_end - db_start) * 1000, 3)
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        source_nc = row["source_file"] or f"{float_id}_prof.nc"
+        provenance = ProvenanceInfo(
+            data_source="Real ARGO GDAC Core Profiles",
+            source_type=f"Real ARGO NetCDF ({source_nc}) via SQLite",
+            float_ids=[float_id],
+            cycle_numbers=[],
+            variables=["temperature", "salinity", "pressure"],
+            region=row["region"],
+            date_range={"start": row["first_obs"], "end": row["last_obs"]},
+            processing_qc_notes="Float profile dataset extracted from indexed multi-profile NetCDF."
+        )
+
+        resp = FloatDetailResponse(
+            float_id=float_id,
+            region=row["region"],
+            platform_type="Core CTD Autonomous Profiler (0-2000m)",
+            dac="INCOIS / ARGO GDAC",
+            first_observation=row["first_obs"],
+            last_observation=row["last_obs"],
+            total_observations=row["total_obs"],
+            total_cycles=row["total_cycles"],
+            depth_range_m={"min": round(row["min_depth"], 1), "max": round(row["max_depth"], 1)},
+            geographic_bounds={
+                "lat_min": round(row["lat_min"], 4),
+                "lat_max": round(row["lat_max"], 4),
+                "lon_min": round(row["lon_min"], 4),
+                "lon_max": round(row["lon_max"], 4)
+            },
+            latest_position={
+                "lat": round(latest_loc["latitude"], 4) if latest_loc else 0.0,
+                "lon": round(latest_loc["longitude"], 4) if latest_loc else 0.0
+            },
+            source_file=source_nc,
+            provenance=provenance,
+            total_latency_ms=total_latency_ms
+        )
+        return resp, db_latency_ms, total_latency_ms
+
+    def get_visualization_float_profiles(self, float_id: str) -> Tuple[Optional[FloatProfileListResponse], float, float]:
+        """Retrieve list of all profile cycles for a given float."""
+        start_total = time.perf_counter()
+        db_start = time.perf_counter()
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT cycle_number, profile_time, latitude, longitude,
+                       COUNT(*) as level_count,
+                       MIN(depth_m) as min_depth, MAX(depth_m) as max_depth,
+                       MIN(temperature_c) as min_temp, MAX(temperature_c) as max_temp,
+                       MIN(salinity_psu) as min_sal, MAX(salinity_psu) as max_sal
+                FROM argo_observations
+                WHERE float_id = ?
+                GROUP BY cycle_number
+                ORDER BY cycle_number ASC
+            """, (float_id.strip(),))
+            rows = cursor.fetchall()
+
+        if not rows:
+            return None, 0.0, round((time.perf_counter() - start_total) * 1000, 3)
+
+        profiles = []
+        for r in rows:
+            profiles.append(ProfileCycleSummary(
+                cycle_number=r["cycle_number"],
+                profile_time=r["profile_time"],
+                latitude=round(r["latitude"], 4),
+                longitude=round(r["longitude"], 4),
+                level_count=r["level_count"],
+                min_depth_m=round(r["min_depth"], 1) if r["min_depth"] is not None else 0.0,
+                max_depth_m=round(r["max_depth"], 1) if r["max_depth"] is not None else 2000.0,
+                min_temp_c=round(r["min_temp"], 2) if r["min_temp"] is not None else None,
+                max_temp_c=round(r["max_temp"], 2) if r["max_temp"] is not None else None,
+                min_sal_psu=round(r["min_sal"], 2) if r["min_sal"] is not None else None,
+                max_sal_psu=round(r["max_sal"], 2) if r["max_sal"] is not None else None,
+                has_anomaly=False
+            ))
+
+        db_end = time.perf_counter()
+        db_latency_ms = round((db_end - db_start) * 1000, 3)
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        resp = FloatProfileListResponse(
+            float_id=float_id,
+            profile_count=len(profiles),
+            profiles=profiles,
+            total_latency_ms=total_latency_ms
+        )
+        return resp, db_latency_ms, total_latency_ms
+
+    def get_visualization_3d_observations(
+        self,
+        region: Optional[str] = None,
+        float_id: Optional[str] = None,
+        cycle_number: Optional[int] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        min_depth: Optional[float] = None,
+        max_depth: Optional[float] = None,
+        variable: Optional[str] = None,
+        is_anomaly_only: bool = False,
+        limit: int = 5000
+    ) -> Tuple[Observations3DResponse, float, float]:
+        """Retrieve real 3D observation points with QC and anomaly data."""
+        start_total = time.perf_counter()
+        safe_limit = min(max(limit, 1), 20000)
+
+        conditions = []
+        params = []
+
+        clean_region = None
+        if region and region.lower() != "all":
+            r_clean = region.strip().lower()
+            clean_region = REGION_MAPPING.get(r_clean, region.strip())
+            conditions.append("region LIKE ?")
+            params.append(f"%{clean_region}%")
+
+        if float_id:
+            conditions.append("float_id = ?")
+            params.append(float_id.strip())
+
+        if cycle_number is not None:
+            conditions.append("cycle_number = ?")
+            params.append(cycle_number)
+
+        if start_date:
+            conditions.append("profile_time >= ?")
+            params.append(start_date)
+
+        if end_date:
+            conditions.append("profile_time <= ?")
+            end_val = end_date if len(end_date) > 10 else f"{end_date}T23:59:59"
+            params.append(end_val)
+
+        if min_depth is not None:
+            conditions.append("depth_m >= ?")
+            params.append(min_depth)
+
+        if max_depth is not None:
+            conditions.append("depth_m <= ?")
+            params.append(max_depth)
+
+        if variable == "temperature":
+            conditions.append("temperature_c IS NOT NULL")
+        elif variable == "salinity":
+            conditions.append("salinity_psu IS NOT NULL")
+
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+        sql = f"""
+            SELECT id, float_id, cycle_number, profile_time, latitude, longitude,
+                   pressure_dbar, depth_m, temperature_c, salinity_psu,
+                   temp_qc, psal_qc, source_file
+            FROM argo_observations
+            {where_clause}
+            ORDER BY profile_time ASC, float_id ASC, cycle_number ASC, depth_m ASC
+            LIMIT ?
+        """
+        params.append(safe_limit)
+
+        db_start = time.perf_counter()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+        db_end = time.perf_counter()
+        db_latency_ms = round((db_end - db_start) * 1000, 3)
+
+        raw_records = [dict(r) for r in rows]
+        enriched_records, _ = detect_anomalies(raw_records, variable="temperature" if variable != "salinity" else "salinity")
+
+        points = []
+        float_ids_set = set()
+        times = []
+        depths = []
+
+        for r in enriched_records:
+            if is_anomaly_only and not r.get("is_anomaly", False):
+                continue
+
+            fid = str(r["float_id"])
+            float_ids_set.add(fid)
+            t_str = str(r["profile_time"])
+            times.append(t_str)
+            d_val = float(r["depth_m"])
+            depths.append(d_val)
+
+            points.append(ObservationPoint3D(
+                id=r.get("id"),
+                float_id=fid,
+                cycle_number=int(r["cycle_number"]),
+                timestamp=t_str,
+                latitude=float(r["latitude"]),
+                longitude=float(r["longitude"]),
+                pressure_dbar=float(r["pressure_dbar"]),
+                depth_m=d_val,
+                temperature_c=r["temperature_c"],
+                salinity_psu=r["salinity_psu"],
+                temp_qc=r.get("temp_qc", "1"),
+                psal_qc=r.get("psal_qc", "1"),
+                z_score=r.get("z_score"),
+                is_anomaly=bool(r.get("is_anomaly", False)),
+                source_file=r.get("source_file")
+            ))
+
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        provenance = ProvenanceInfo(
+            data_source="Real ARGO GDAC Core Profiles",
+            source_type="Real ARGO NetCDF (*.nc) via SQLite",
+            float_ids=sorted(list(float_ids_set))[:10],
+            cycle_numbers=[],
+            variables=["temperature", "salinity"],
+            region=clean_region or "Bay of Bengal / Arabian Sea",
+            date_range={"start": min(times) if times else None, "end": max(times) if times else None},
+            processing_qc_notes="Real 3D observation coordinates with statistical Z-scores."
+        )
+
+        resp = Observations3DResponse(
+            point_count=len(points),
+            float_count=len(float_ids_set),
+            region=clean_region,
+            date_range={"start": min(times) if times else None, "end": max(times) if times else None},
+            depth_range_m={"min": min(depths) if depths else None, "max": max(depths) if depths else None},
+            points=points,
+            provenance=provenance,
+            sqlite_db_latency_ms=db_latency_ms,
+            total_latency_ms=total_latency_ms
+        )
+        return resp, db_latency_ms, total_latency_ms
+
+    def get_visualization_profile_analysis(
+        self,
+        profile_id: str,
+        float_id: Optional[str] = None,
+        cycle_number: Optional[int] = None
+    ) -> Tuple[Optional[ProfileVisualAnalysisResponse], float, float]:
+        """Retrieve vertical CTD profile with thermocline and salinity gradient calculations."""
+        start_total = time.perf_counter()
+
+        target_float = float_id
+        target_cycle = cycle_number
+
+        if not target_float:
+            # Parse profile_id format: e.g. "2902235_1", "2902235-1", or "2902235"
+            parts = profile_id.replace("-", "_").split("_")
+            target_float = parts[0]
+            if len(parts) > 1 and parts[1].isdigit():
+                target_cycle = int(parts[1])
+
+        db_start = time.perf_counter()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if target_cycle is not None:
+                cursor.execute("""
+                    SELECT * FROM argo_observations
+                    WHERE float_id = ? AND cycle_number = ?
+                    ORDER BY depth_m ASC
+                """, (target_float, target_cycle))
+            else:
+                cursor.execute("""
+                    SELECT * FROM argo_observations
+                    WHERE float_id = ? AND cycle_number = (
+                        SELECT MAX(cycle_number) FROM argo_observations WHERE float_id = ?
+                    )
+                    ORDER BY depth_m ASC
+                """, (target_float, target_float))
+            rows = cursor.fetchall()
+        db_end = time.perf_counter()
+        db_latency_ms = round((db_end - db_start) * 1000, 3)
+
+        if not rows:
+            return None, db_latency_ms, round((time.perf_counter() - start_total) * 1000, 3)
+
+        first_row = rows[0]
+        actual_cycle = first_row["cycle_number"]
+        profile_time = first_row["profile_time"]
+        latitude = first_row["latitude"]
+        longitude = first_row["longitude"]
+        region = first_row["region"]
+        source_file = first_row["source_file"]
+
+        raw_levels = [dict(r) for r in rows]
+        enriched_levels, _ = detect_anomalies(raw_levels, variable="temperature")
+
+        thermocline_res = detect_thermocline(raw_levels)
+        halocline_res = detect_salinity_gradient(raw_levels)
+
+        visual_levels = []
+        for r in enriched_levels:
+            visual_levels.append(ProfileLevelVisual(
+                depth_m=round(r["depth_m"], 2),
+                pressure_dbar=round(r["pressure_dbar"], 2),
+                temperature_c=round(r["temperature_c"], 3) if r.get("temperature_c") is not None else None,
+                salinity_psu=round(r["salinity_psu"], 3) if r.get("salinity_psu") is not None else None,
+                temp_qc=r.get("temp_qc", "1"),
+                psal_qc=r.get("psal_qc", "1"),
+                z_score=r.get("z_score"),
+                is_anomaly=bool(r.get("is_anomaly", False))
+            ))
+
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        provenance = ProvenanceInfo(
+            data_source="Real ARGO GDAC Core Profiles",
+            source_type=f"Real ARGO NetCDF ({source_file}) via SQLite",
+            float_ids=[target_float],
+            cycle_numbers=[actual_cycle],
+            variables=["temperature", "salinity", "pressure"],
+            region=region,
+            date_range={"start": profile_time, "end": profile_time},
+            processing_qc_notes="Vertical CTD depth analysis with deterministic finite-difference gradients."
+        )
+
+        resp = ProfileVisualAnalysisResponse(
+            float_id=target_float,
+            cycle_number=actual_cycle,
+            profile_time=profile_time,
+            latitude=latitude,
+            longitude=longitude,
+            region=region,
+            source_file=source_file,
+            levels=visual_levels,
+            thermocline=thermocline_res,
+            halocline=halocline_res,
+            provenance=provenance,
+            total_latency_ms=total_latency_ms
+        )
+        return resp, db_latency_ms, total_latency_ms
+
+    def get_visualization_anomalies(
+        self,
+        region: Optional[str] = None,
+        variable: str = "temperature",
+        min_z_score: float = 2.0,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        float_id: Optional[str] = None,
+        limit: int = 200
+    ) -> Tuple[AnomalyListResponse, float, float]:
+        """Retrieve statistical baseline anomalies (|z| > 2.0) across real ARGO observations."""
+        start_total = time.perf_counter()
+
+        conditions = []
+        params = []
+
+        clean_region = None
+        if region and region.lower() != "all":
+            r_clean = region.strip().lower()
+            clean_region = REGION_MAPPING.get(r_clean, region.strip())
+            conditions.append("region LIKE ?")
+            params.append(f"%{clean_region}%")
+
+        if float_id:
+            conditions.append("float_id = ?")
+            params.append(float_id.strip())
+
+        if start_date:
+            conditions.append("profile_time >= ?")
+            params.append(start_date)
+
+        if end_date:
+            conditions.append("profile_time <= ?")
+            end_val = end_date if len(end_date) > 10 else f"{end_date}T23:59:59"
+            params.append(end_val)
+
+        if variable == "temperature":
+            conditions.append("temperature_c IS NOT NULL")
+        else:
+            conditions.append("salinity_psu IS NOT NULL")
+
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+        sql = f"""
+            SELECT float_id, cycle_number, profile_time, latitude, longitude, region,
+                   depth_m, temperature_c, salinity_psu, source_file
+            FROM argo_observations
+            {where_clause}
+            ORDER BY profile_time DESC
+            LIMIT 15000
+        """
+
+        db_start = time.perf_counter()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+        db_end = time.perf_counter()
+        db_latency_ms = round((db_end - db_start) * 1000, 3)
+
+        raw_records = [dict(r) for r in rows]
+        enriched_records, summary = detect_anomalies(raw_records, variable=variable)
+
+        val_key = "temperature_c" if variable == "temperature" else "salinity_psu"
+        anomalies_list = []
+
+        for r in enriched_records:
+            z = r.get("z_score")
+            if z is not None and abs(z) >= min_z_score:
+                obs_val = r.get(val_key, 0.0)
+                base_mean = r.get("baseline_mean", obs_val)
+                dev = round(obs_val - base_mean, 3) if obs_val is not None and base_mean is not None else 0.0
+
+                if variable == "temperature":
+                    status_lbl = "Potential anomalous warming signal" if z > 0 else "Potential anomalous cooling signal"
+                else:
+                    status_lbl = "Anomalous high salinity signal" if z > 0 else "Anomalous freshwater signal"
+
+                anomalies_list.append(AnomalyDetailItem(
+                    float_id=str(r["float_id"]),
+                    cycle_number=int(r["cycle_number"]),
+                    profile_time=str(r["profile_time"]),
+                    latitude=float(r["latitude"]),
+                    longitude=float(r["longitude"]),
+                    region=str(r["region"]),
+                    depth_m=float(r["depth_m"]),
+                    variable=variable,
+                    observed_value=float(obs_val),
+                    baseline_mean=float(base_mean),
+                    baseline_std=float(r.get("baseline_std", 0.0)),
+                    deviation=dev,
+                    z_score=float(z),
+                    depth_band=str(r.get("depth_band", "0-200m")),
+                    status_label=status_lbl,
+                    source_file=str(r.get("source_file", f"{r['float_id']}_prof.nc"))
+                ))
+
+                if len(anomalies_list) >= limit:
+                    break
+
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        provenance = ProvenanceInfo(
+            data_source="Real ARGO GDAC Core Profiles",
+            source_type="Real ARGO NetCDF (*.nc) via SQLite",
+            float_ids=list(set(a.float_id for a in anomalies_list[:10])),
+            cycle_numbers=[],
+            variables=[variable],
+            region=clean_region or "Bay of Bengal / Arabian Sea",
+            date_range={"start": None, "end": None},
+            processing_qc_notes="Statistical anomaly analysis: z = (observed - mean) / std > 2.0σ relative to region/month/depth-band baseline."
+        )
+
+        resp = AnomalyListResponse(
+            anomaly_count=len(anomalies_list),
+            anomalies=anomalies_list,
+            threshold_z=min_z_score,
+            provenance=provenance,
+            total_latency_ms=total_latency_ms
+        )
+        return resp, db_latency_ms, total_latency_ms
+
+    def get_visualization_provenance(
+        self,
+        float_id: Optional[str] = None,
+        cycle_number: Optional[int] = None,
+        region: Optional[str] = None
+    ) -> Tuple[ProvenanceDetailResponse, float, float]:
+        """Retrieve traceable scientific provenance for displayed observations."""
+        start_total = time.perf_counter()
+        netcdf_files = []
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if float_id:
+                cursor.execute("SELECT DISTINCT source_file, region FROM argo_observations WHERE float_id = ?", (float_id.strip(),))
+                rows = cursor.fetchall()
+                netcdf_files = [r["source_file"] for r in rows if r["source_file"]]
+                reg = rows[0]["region"] if rows else (region or "Indian Ocean")
+            else:
+                cursor.execute("SELECT DISTINCT source_file FROM argo_observations LIMIT 24")
+                rows = cursor.fetchall()
+                netcdf_files = [r["source_file"] for r in rows if r["source_file"]]
+                reg = region or "Bay of Bengal & Arabian Sea"
+
+        if not netcdf_files and float_id:
+            netcdf_files = [f"{float_id}_prof.nc"]
+
+        end_total = time.perf_counter()
+        total_latency_ms = round((end_total - start_total) * 1000, 3)
+
+        resp = ProvenanceDetailResponse(
+            float_id=float_id,
+            cycle_number=cycle_number,
+            region=reg,
+            data_source="Real ARGO Global Data Assembly Centre (GDAC) Core CTD Multi-Profile Dataset",
+            source_type="Real NetCDF (*.nc / *_prof.nc) parsed via Python xarray and indexed in SQLite",
+            netcdf_files=netcdf_files,
+            variables=["PRES (Sea Pressure, dbar)", "TEMP (Sea Temperature, °C)", "PSAL (Practical Salinity, PSU)"],
+            qc_policy="ARGO Quality Control Manual v3.3; Only observations with QC Flags 1 ('Good Data') and 2 ('Probably Good Data') are retained.",
+            citation="Argo (2026). Argo float data and metadata from Global Data Assembly Centre (GDAC). SEANOE. https://doi.org/10.17882/42182",
+            total_latency_ms=total_latency_ms
+        )
+        return resp, 0.0, total_latency_ms
 
 

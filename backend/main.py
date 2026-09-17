@@ -42,6 +42,11 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(query_router, prefix="/api/v1")
 app.include_router(visualization_router, prefix="/api/v1")
 
+# Also mount on /api for direct /api/visualizations/... and /api/query access
+app.include_router(health_router, prefix="/api")
+app.include_router(query_router, prefix="/api")
+app.include_router(visualization_router, prefix="/api")
+
 
 @app.get("/")
 def root():
@@ -52,5 +57,10 @@ def root():
         "query_endpoint": "/api/v1/query",
         "nl_query_execute": "/api/v1/nl-query/execute",
         "trajectory_endpoint": "/api/v1/visualization/trajectory",
-        "floats_endpoint": "/api/v1/visualization/floats"
+        "floats_endpoint": "/api/v1/visualization/floats",
+        "visualizations_regions": "/api/visualizations/regions",
+        "visualizations_floats": "/api/visualizations/floats",
+        "visualizations_observations": "/api/visualizations/observations",
+        "visualizations_anomalies": "/api/visualizations/anomalies",
+        "visualizations_provenance": "/api/visualizations/provenance"
     }

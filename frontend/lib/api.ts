@@ -12,6 +12,14 @@ import {
   KeyValueMetric,
   VisualizationType,
   HistoryItem,
+  RegionListResponse,
+  FloatDetailResponse,
+  FloatProfileListResponse,
+  Observations3DResponse,
+  ObservationParams,
+  AnomalyListResponse,
+  ProfileVisualAnalysisResponse,
+  ProvenanceDetailResponse,
 } from "./types";
 
 const BACKEND_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -540,3 +548,156 @@ export async function submitOceanQuery(
     isClarification,
   };
 }
+
+/**
+ * 7. GET /api/visualizations/regions
+ */
+export async function getVisualizationRegions(): Promise<RegionListResponse> {
+  const cacheKey = "vis_regions";
+  const cached = getFromCache<RegionListResponse>(cacheKey, 60000);
+  if (cached) return cached;
+
+  const res = await fetch(`${BACKEND_API_URL}/api/visualizations/regions`);
+  if (!res.ok) throw new Error(`Failed to fetch regions: HTTP ${res.status}`);
+  const data: RegionListResponse = await res.json();
+  setInCache(cacheKey, data);
+  return data;
+}
+
+/**
+ * 8. GET /api/visualizations/floats
+ */
+export async function getVisualizationFloatsList(region?: string): Promise<FloatSummaryResponse> {
+  const rKey = region && region !== "All" ? region.toLowerCase().replace(/\s+/g, "_") : "all";
+  const cacheKey = `vis_floats_${rKey}`;
+  const cached = getFromCache<FloatSummaryResponse>(cacheKey, 60000);
+  if (cached) return cached;
+
+  const url = new URL(`${BACKEND_API_URL}/api/visualizations/floats`);
+  if (region && region !== "All") url.searchParams.set("region", rKey);
+
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Failed to fetch floats list: HTTP ${res.status}`);
+  const data: FloatSummaryResponse = await res.json();
+  setInCache(cacheKey, data);
+  return data;
+}
+
+/**
+ * 9. GET /api/visualizations/floats/{float_id}
+ */
+export async function getVisualizationFloatDetail(floatId: string): Promise<FloatDetailResponse> {
+  const cacheKey = `vis_float_detail_${floatId}`;
+  const cached = getFromCache<FloatDetailResponse>(cacheKey, 120000);
+  if (cached) return cached;
+
+  const res = await fetch(`${BACKEND_API_URL}/api/visualizations/floats/${encodeURIComponent(floatId)}`);
+  if (!res.ok) throw new Error(`Failed to fetch float details for ${floatId}: HTTP ${res.status}`);
+  const data: FloatDetailResponse = await res.json();
+  setInCache(cacheKey, data);
+  return data;
+}
+
+/**
+ * 10. GET /api/visualizations/floats/{float_id}/profiles
+ */
+export async function getVisualizationFloatProfiles(floatId: string): Promise<FloatProfileListResponse> {
+  const cacheKey = `vis_float_profiles_${floatId}`;
+  const cached = getFromCache<FloatProfileListResponse>(cacheKey, 60000);
+  if (cached) return cached;
+
+  const res = await fetch(`${BACKEND_API_URL}/api/visualizations/floats/${encodeURIComponent(floatId)}/profiles`);
+  if (!res.ok) throw new Error(`Failed to fetch float profiles for ${floatId}: HTTP ${res.status}`);
+  const data: FloatProfileListResponse = await res.json();
+  setInCache(cacheKey, data);
+  return data;
+}
+
+/**
+ * 11. GET /api/visualizations/observations
+ */
+export async function getVisualizationObservations(params?: ObservationParams): Promise<Observations3DResponse> {
+  const url = new URL(`${BACKEND_API_URL}/api/visualizations/observations`);
+  if (params?.region && params.region !== "All") url.searchParams.set("region", params.region.toLowerCase().replace(/\s+/g, "_"));
+  if (params?.float_id) url.searchParams.set("float_id", params.float_id);
+  if (params?.cycle_number !== undefined) url.searchParams.set("cycle_number", params.cycle_number.toString());
+  if (params?.start_date) url.searchParams.set("start_date", params.start_date);
+  if (params?.end_date) url.searchParams.set("end_date", params.end_date);
+  if (params?.min_depth !== undefined) url.searchParams.set("min_depth", params.min_depth.toString());
+  if (params?.max_depth !== undefined) url.searchParams.set("max_depth", params.max_depth.toString());
+  if (params?.variable) url.searchParams.set("variable", params.variable.toLowerCase());
+  if (params?.is_anomaly_only) url.searchParams.set("is_anomaly_only", "true");
+  if (params?.limit) url.searchParams.set("limit", params.limit.toString());
+
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Failed to fetch 3D observations: HTTP ${res.status}`);
+  return await res.json();
+}
+
+/**
+ * 12. GET /api/visualizations/profile/{profile_id}
+ */
+export async function getVisualizationProfileVisual(
+  profileId: string,
+  floatId?: string,
+  cycleNumber?: number
+): Promise<ProfileVisualAnalysisResponse> {
+  const cacheKey = `vis_prof_visual_${profileId}_${floatId ?? ""}_${cycleNumber ?? ""}`;
+  const cached = getFromCache<ProfileVisualAnalysisResponse>(cacheKey, 60000);
+  if (cached) return cached;
+
+  const url = new URL(`${BACKEND_API_URL}/api/visualizations/profile/${encodeURIComponent(profileId)}`);
+  if (floatId) url.searchParams.set("float_id", floatId);
+  if (cycleNumber !== undefined) url.searchParams.set("cycle_number", cycleNumber.toString());
+
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Failed to fetch profile analysis: HTTP ${res.status}`);
+  const data: ProfileVisualAnalysisResponse = await res.json();
+  setInCache(cacheKey, data);
+  return data;
+}
+
+/**
+ * 13. GET /api/visualizations/anomalies
+ */
+export async function getVisualizationAnomalies(params?: {
+  region?: string;
+  variable?: string;
+  min_z_score?: number;
+  start_date?: string;
+  end_date?: string;
+  float_id?: string;
+  limit?: number;
+}): Promise<AnomalyListResponse> {
+  const url = new URL(`${BACKEND_API_URL}/api/visualizations/anomalies`);
+  if (params?.region && params.region !== "All") url.searchParams.set("region", params.region.toLowerCase().replace(/\s+/g, "_"));
+  if (params?.variable) url.searchParams.set("variable", params.variable.toLowerCase());
+  if (params?.min_z_score !== undefined) url.searchParams.set("min_z_score", params.min_z_score.toString());
+  if (params?.start_date) url.searchParams.set("start_date", params.start_date);
+  if (params?.end_date) url.searchParams.set("end_date", params.end_date);
+  if (params?.float_id) url.searchParams.set("float_id", params.float_id);
+  if (params?.limit) url.searchParams.set("limit", params.limit.toString());
+
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Failed to fetch anomalies: HTTP ${res.status}`);
+  return await res.json();
+}
+
+/**
+ * 14. GET /api/visualizations/provenance
+ */
+export async function getVisualizationProvenance(
+  floatId?: string,
+  cycleNumber?: number,
+  region?: string
+): Promise<ProvenanceDetailResponse> {
+  const url = new URL(`${BACKEND_API_URL}/api/visualizations/provenance`);
+  if (floatId) url.searchParams.set("float_id", floatId);
+  if (cycleNumber !== undefined) url.searchParams.set("cycle_number", cycleNumber.toString());
+  if (region && region !== "All") url.searchParams.set("region", region);
+
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`Failed to fetch provenance: HTTP ${res.status}`);
+  return await res.json();
+}
+

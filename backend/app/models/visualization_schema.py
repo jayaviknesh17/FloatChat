@@ -61,20 +61,24 @@ class FloatSummaryResponse(BaseModel):
 
 
 class RegionSummaryItem(BaseModel):
-    """Summary item for global ocean region exploration cards."""
+    """Summary item for ocean regions (explorer cards and 3D globe focus)."""
 
-    region_id: str = Field(..., description="Canonical region identifier (e.g. western_pacific)")
-    name: str = Field(..., description="Display name of region (e.g. Western Pacific)")
-    float_count: int = Field(..., description="Number of unique ARGO floats in region")
-    profile_count: int = Field(..., description="Total profile cycles in region")
-    observation_count: int = Field(..., description="Total observation levels recorded")
-    latest_profile_date: Optional[str] = Field(None, description="ISO timestamp or date of most recent profile")
-    has_data: bool = Field(..., description="Whether real ARGO float data exists in current dataset")
-    source: str = Field("Real ARGO GDAC", description="Data source provenance indicator")
+    region_id: str = Field(..., description="Normalized key (e.g., 'bay_of_bengal')")
+    name: str = Field(..., description="Display name (e.g., 'Bay of Bengal')")
+    float_count: int = Field(default=0, description="Number of unique ARGO floats in region")
+    profile_count: Optional[int] = Field(default=0, description="Total profile cycles in region")
+    observation_count: Optional[int] = Field(default=0, description="Total observation points recorded")
+    latest_profile_date: Optional[str] = Field(default=None, description="ISO timestamp or date of most recent profile")
+    has_data: Optional[bool] = Field(default=False, description="Whether real ARGO float data exists in current dataset")
+    source: Optional[str] = Field(default="Real ARGO GDAC", description="Data source provenance indicator")
+    description: Optional[str] = Field(default=None, description="Oceanographic description")
+    date_range: Optional[Dict[str, Optional[str]]] = Field(default=None, description="Temporal range {start, end}")
+    bounds: Optional[Dict[str, float]] = Field(default=None, description="Geographic bounding box {lat_min, lat_max, lon_min, lon_max}")
+    camera_target: Optional[Dict[str, float]] = Field(default=None, description="3D globe camera orientation {lat, lon, zoom}")
 
 
 class RegionSummaryResponse(BaseModel):
-    """API response payload for GET /api/v1/visualization/regions."""
+    """API response payload for GET /api/v1/visualization/regions and /regions."""
 
     total_regions: int = Field(..., description="Total canonical regions evaluated (12)")
     regions_with_data: int = Field(..., description="Number of regions containing at least one real float")
@@ -84,3 +88,167 @@ class RegionSummaryResponse(BaseModel):
     sqlite_db_latency_ms: float = Field(..., description="SQLite query execution latency in ms")
     total_latency_ms: float = Field(..., description="Total API endpoint processing latency in ms")
 
+
+# --- 4D Visualization Specific Schemas ---
+
+class RegionListResponse(BaseModel):
+    """API response for GET /api/visualizations/regions."""
+
+    region_count: int = Field(..., description="Number of ocean regions")
+    regions: List[RegionSummaryItem] = Field(..., description="List of regions")
+    total_latency_ms: float = Field(..., description="Total API latency in ms")
+
+
+class FloatDetailResponse(BaseModel):
+    """Comprehensive float details for inspector panel."""
+
+    float_id: str = Field(..., description="ARGO float platform number (WMO)")
+    region: str = Field(..., description="Primary geographic region")
+    platform_type: str = Field(default="APEX / PROVOR CTD Profiler", description="Profiling platform type")
+    dac: str = Field(default="INCOIS / ARGO GDAC", description="Data Assembly Center")
+    first_observation: str = Field(..., description="Earliest observation ISO timestamp")
+    last_observation: str = Field(..., description="Latest observation ISO timestamp")
+    total_observations: int = Field(..., description="Total observation levels recorded")
+    total_cycles: int = Field(..., description="Total profile cycles completed")
+    depth_range_m: Dict[str, float] = Field(..., description="Depth coverage {min, max}")
+    geographic_bounds: Dict[str, float] = Field(..., description="Spatial bounding box {lat_min, lat_max, lon_min, lon_max}")
+    latest_position: Dict[str, float] = Field(..., description="Latest coordinates {lat, lon}")
+    source_file: str = Field(..., description="Original NetCDF source file")
+    provenance: ProvenanceInfo = Field(..., description="Traceable provenance")
+    total_latency_ms: float = Field(..., description="Total API latency in ms")
+
+
+class ProfileCycleSummary(BaseModel):
+    """Summary of a single vertical profile cycle."""
+
+    cycle_number: int = Field(..., description="ARGO cycle number")
+    profile_time: str = Field(..., description="Observation timestamp (ISO 8601)")
+    latitude: float = Field(..., description="Latitude in decimal degrees")
+    longitude: float = Field(..., description="Longitude in decimal degrees")
+    level_count: int = Field(..., description="Number of vertical measurement levels")
+    min_depth_m: float = Field(..., description="Minimum depth in meters")
+    max_depth_m: float = Field(..., description="Maximum depth in meters")
+    min_temp_c: Optional[float] = Field(None, description="Minimum temperature in °C")
+    max_temp_c: Optional[float] = Field(None, description="Maximum temperature in °C")
+    min_sal_psu: Optional[float] = Field(None, description="Minimum practical salinity")
+    max_sal_psu: Optional[float] = Field(None, description="Maximum practical salinity")
+    has_anomaly: bool = Field(default=False, description="Whether this cycle contains a statistical anomaly")
+
+
+class FloatProfileListResponse(BaseModel):
+    """API response for GET /api/visualizations/floats/{float_id}/profiles."""
+
+    float_id: str = Field(..., description="ARGO float platform number")
+    profile_count: int = Field(..., description="Number of profile cycles")
+    profiles: List[ProfileCycleSummary] = Field(..., description="List of profile summaries")
+    total_latency_ms: float = Field(..., description="Total API latency in ms")
+
+
+class ObservationPoint3D(BaseModel):
+    """3D observation coordinate and measurement point for WebGL rendering."""
+
+    id: Optional[int] = Field(None, description="Internal observation ID")
+    float_id: str = Field(..., description="ARGO float platform number")
+    cycle_number: int = Field(..., description="Cycle number")
+    timestamp: str = Field(..., description="ISO 8601 observation timestamp")
+    latitude: float = Field(..., description="Latitude")
+    longitude: float = Field(..., description="Longitude")
+    pressure_dbar: float = Field(..., description="Pressure in dbar")
+    depth_m: float = Field(..., description="Depth in meters")
+    temperature_c: Optional[float] = Field(None, description="Temperature in °C")
+    salinity_psu: Optional[float] = Field(None, description="Salinity in PSU")
+    temp_qc: Optional[str] = Field("1", description="Temperature QC flag")
+    psal_qc: Optional[str] = Field("1", description="Salinity QC flag")
+    z_score: Optional[float] = Field(None, description="Statistical Z-score")
+    is_anomaly: bool = Field(default=False, description="Anomaly flag (|z| > 2)")
+    source_file: Optional[str] = Field(None, description="Source NetCDF file")
+
+
+class Observations3DResponse(BaseModel):
+    """API response for GET /api/visualizations/observations."""
+
+    point_count: int = Field(..., description="Number of observation points returned")
+    float_count: int = Field(..., description="Number of unique floats")
+    region: Optional[str] = Field(None, description="Region filter")
+    date_range: Dict[str, Optional[str]] = Field(..., description="Date bounds {start, end}")
+    depth_range_m: Dict[str, Optional[float]] = Field(..., description="Depth bounds {min, max}")
+    points: List[ObservationPoint3D] = Field(..., description="Observation points")
+    provenance: ProvenanceInfo = Field(..., description="Provenance information")
+    sqlite_db_latency_ms: float = Field(..., description="SQLite query execution latency in ms")
+    total_latency_ms: float = Field(..., description="Total API latency in ms")
+
+
+class AnomalyDetailItem(BaseModel):
+    """Statistical anomaly event for visualization & explanation."""
+
+    float_id: str = Field(..., description="ARGO float platform number")
+    cycle_number: int = Field(..., description="Cycle number")
+    profile_time: str = Field(..., description="Timestamp (ISO)")
+    latitude: float = Field(..., description="Latitude")
+    longitude: float = Field(..., description="Longitude")
+    region: str = Field(..., description="Ocean region")
+    depth_m: float = Field(..., description="Depth in meters")
+    variable: str = Field(..., description="Variable analyzed ('temperature' or 'salinity')")
+    observed_value: float = Field(..., description="Observed measurement value")
+    baseline_mean: float = Field(..., description="Regional baseline mean")
+    baseline_std: float = Field(..., description="Regional baseline standard deviation")
+    deviation: float = Field(..., description="Deviation delta (observed - baseline)")
+    z_score: float = Field(..., description="Z-score value")
+    depth_band: str = Field(..., description="Depth band classification")
+    status_label: str = Field(..., description="Status explanation label")
+    source_file: str = Field(..., description="Source NetCDF filename")
+
+
+class AnomalyListResponse(BaseModel):
+    """API response for GET /api/visualizations/anomalies."""
+
+    anomaly_count: int = Field(..., description="Number of anomalies returned")
+    anomalies: List[AnomalyDetailItem] = Field(..., description="List of anomalies")
+    threshold_z: float = Field(default=2.0, description="Z-score threshold applied")
+    provenance: ProvenanceInfo = Field(..., description="Provenance metadata")
+    total_latency_ms: float = Field(..., description="Total API latency in ms")
+
+
+class ProfileLevelVisual(BaseModel):
+    """Single level in a vertical CTD profile."""
+
+    depth_m: float = Field(..., description="Depth in meters")
+    pressure_dbar: float = Field(..., description="Pressure in decibars")
+    temperature_c: Optional[float] = Field(None, description="Temperature in °C")
+    salinity_psu: Optional[float] = Field(None, description="Salinity in PSU")
+    temp_qc: str = Field(..., description="Temperature QC flag")
+    psal_qc: str = Field(..., description="Salinity QC flag")
+    z_score: Optional[float] = Field(None, description="Temperature Z-score")
+    is_anomaly: bool = Field(default=False, description="Anomaly flag")
+
+
+class ProfileVisualAnalysisResponse(BaseModel):
+    """API response for GET /api/visualizations/profile/{profile_id}."""
+
+    float_id: str = Field(..., description="Float ID")
+    cycle_number: int = Field(..., description="Cycle number")
+    profile_time: str = Field(..., description="Profile timestamp (ISO)")
+    latitude: float = Field(..., description="Latitude")
+    longitude: float = Field(..., description="Longitude")
+    region: str = Field(..., description="Region")
+    source_file: str = Field(..., description="Source NetCDF file")
+    levels: List[ProfileLevelVisual] = Field(..., description="Depth-sorted CTD levels")
+    thermocline: Dict[str, Any] = Field(..., description="Thermocline calculation results")
+    halocline: Dict[str, Any] = Field(..., description="Salinity gradient calculation results")
+    provenance: ProvenanceInfo = Field(..., description="Traceable provenance")
+    total_latency_ms: float = Field(..., description="Total API latency in ms")
+
+
+class ProvenanceDetailResponse(BaseModel):
+    """API response for GET /api/visualizations/provenance."""
+
+    float_id: Optional[str] = Field(None, description="Float ID if queried")
+    cycle_number: Optional[int] = Field(None, description="Cycle number if queried")
+    region: str = Field(..., description="Region")
+    data_source: str = Field(default="Real ARGO GDAC Core Profiles", description="Data Source")
+    source_type: str = Field(default="Real ARGO NetCDF (*.nc) via SQLite", description="Source format")
+    netcdf_files: List[str] = Field(..., description="Source NetCDF files referenced")
+    variables: List[str] = Field(..., description="Variables included")
+    qc_policy: str = Field(..., description="QC policy details")
+    citation: str = Field(..., description="Official ARGO scientific citation")
+    total_latency_ms: float = Field(..., description="Total API latency in ms")
