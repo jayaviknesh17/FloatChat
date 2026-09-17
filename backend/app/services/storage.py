@@ -69,34 +69,40 @@ class StorageService:
             logger.info("No observation records to save.")
             return 0
 
-        # Convert records to list of dicts
-        data = [r.dict() for r in records]
-        df = pd.DataFrame(data)
+        logger.info(f"Saving {len(records)} observation records to SQLite...")
 
-        # Convert profile_time to string format for SQLite ISO compliance
-        df["profile_time"] = df["profile_time"].apply(
-            lambda x: x.isoformat() if hasattr(x, "isoformat") else str(x)
-        )
+        # 1. Save directly to SQLite using batch executemany
+        insert_query = """
+            INSERT INTO argo_observations (
+                float_id, cycle_number, profile_time, latitude, longitude,
+                region, depth_m, pressure_dbar, temperature_c, salinity_psu,
+                temp_qc, psal_qc, source_file
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
 
-        # 1. Save to SQLite
+        batch_size = 50000
         with sqlite3.connect(self.db_path) as conn:
-            df.to_sql("argo_observations", conn, if_exists="append", index=False)
-            logger.info(f"Saved {len(df)} records to SQLite database: {self.db_path}")
+            cursor = conn.cursor()
+            rows_to_insert = []
+            for r in records:
+                p_time = r.profile_time.isoformat() if hasattr(r.profile_time, "isoformat") else str(r.profile_time)
+                rows_to_insert.append((
+                    r.float_id, r.cycle_number, p_time, r.latitude, r.longitude,
+                    r.region, r.depth_m, r.pressure_dbar, r.temperature_c, r.salinity_psu,
+                    r.temp_qc, r.psal_qc, r.source_file
+                ))
+                if len(rows_to_insert) >= batch_size:
+                    cursor.executemany(insert_query, rows_to_insert)
+                    conn.commit()
+                    rows_to_insert = []
+            if rows_to_insert:
+                cursor.executemany(insert_query, rows_to_insert)
+                conn.commit()
+
+        logger.info(f"Saved {len(records)} records to SQLite database: {self.db_path}")
 
         # Refresh lightweight float summary table
         self.refresh_float_summary_table()
-
-        # 2. Save to Parquet
-        try:
-            if self.parquet_path.exists():
-                existing_df = pd.read_parquet(self.parquet_path)
-                combined_df = pd.concat([existing_df, df], ignore_index=True)
-                combined_df.to_parquet(self.parquet_path, index=False)
-            else:
-                df.to_parquet(self.parquet_path, index=False)
-            logger.info(f"Saved {len(df)} records to Parquet file: {self.parquet_path}")
-        except Exception as e:
-            logger.error(f"Error saving to Parquet file {self.parquet_path}: {e}")
 
         return len(records)
 
