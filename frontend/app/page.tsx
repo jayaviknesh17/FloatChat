@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import TopNav from "@/components/layout/TopNav";
 import OceanBackground from "@/components/layout/OceanBackground";
@@ -41,6 +41,7 @@ export default function Home() {
   // Modals state
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Load data-driven status and pending query on mount
   useEffect(() => {
@@ -74,9 +75,38 @@ export default function Home() {
     }
   }, []);
 
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+  };
+
+  const handleRegenerate = (queryText: string) => {
+    if (!queryText) return;
+    setMessages((prev) => {
+      if (prev.length === 0) return prev;
+      const lastMsg = prev[prev.length - 1];
+      if (lastMsg && lastMsg.sender === "floatchat") {
+        return prev.slice(0, prev.length - 1);
+      }
+      return prev;
+    });
+    setTimeout(() => {
+      handleSendMessage(queryText);
+    }, 50);
+  };
+
   // Submit Query to Conversation Stream
   const handleSendMessage = async (queryText: string, activeFilters: string[] = []) => {
     if (!queryText.trim()) return;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     // Build short recent conversation history for backend context (max 10 items)
     const history: HistoryItem[] = messages
@@ -113,7 +143,7 @@ export default function Home() {
     });
 
     try {
-      const result = await submitOceanQuery(queryText, activeFilters, history);
+      const result = await submitOceanQuery(queryText, activeFilters, history, controller.signal);
 
       const botMessageId = `bot_${Date.now()}`;
       const botMessage: ChatMessage = {
@@ -125,6 +155,10 @@ export default function Home() {
 
       setMessages((prev) => [...prev, botMessage]);
     } catch (err: any) {
+      if (err.name === "AbortError") {
+        console.log("Query execution cancelled by user.");
+        return;
+      }
       console.error("Query execution error:", err);
       const errorMessageId = `bot_err_${Date.now()}`;
       const errorMessageText = err?.message || "An error occurred while executing the query. Please try submitting again.";
@@ -190,6 +224,7 @@ export default function Home() {
     } finally {
       setIsLoading(false);
       setComposerInitialQuery("");
+      abortControllerRef.current = null;
     }
   };
 
@@ -202,6 +237,11 @@ export default function Home() {
   };
 
   const handleNewChat = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
     setMessages([]);
     setSelectedFloat(null);
     setSelectedAnomaly(null);
@@ -265,6 +305,7 @@ export default function Home() {
                 qcStatus: "QC Flag 1 (Good Data)",
               });
             }}
+            onRegenerate={handleRegenerate}
           />
         )}
 
@@ -274,6 +315,7 @@ export default function Home() {
             initialQuery={composerInitialQuery}
             isLoading={isLoading}
             onSubmit={handleSendMessage}
+            onStop={handleStopGeneration}
           />
           <Footer />
         </div>
