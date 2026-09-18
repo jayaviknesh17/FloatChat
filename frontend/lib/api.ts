@@ -263,7 +263,8 @@ export async function getTrajectory(params?: TrajectoryParams): Promise<Trajecto
  */
 export async function executeNLQuery(
   query: string,
-  history?: HistoryItem[]
+  history?: HistoryItem[],
+  signal?: AbortSignal
 ): Promise<NLExecutionResponse> {
   const url = `${BACKEND_API_URL}/api/v1/nl-query/execute`;
 
@@ -275,7 +276,7 @@ export async function executeNLQuery(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, history: history || [] }),
-      signal: controller.signal,
+      signal: signal || controller.signal,
     });
     clearTimeout(timeoutId);
 
@@ -289,7 +290,7 @@ export async function executeNLQuery(
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === "AbortError") {
-      throw new Error("Natural language query execution timed out after 15s.");
+      throw err;
     }
     throw err;
   }
@@ -475,10 +476,11 @@ export async function getSystemStatus(): Promise<SystemStatus> {
 export async function submitOceanQuery(
   query: string,
   selectedFilters?: string[],
-  history?: HistoryItem[]
+  history?: HistoryItem[],
+  signal?: AbortSignal
 ): Promise<QueryResult> {
   // Execute real backend query
-  const nlResponse = await executeNLQuery(query, history);
+  const nlResponse = await executeNLQuery(query, history, signal);
 
   const understoodQuery: UnderstoodQuery = {
     originalQuery: nlResponse.original_query,

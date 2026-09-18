@@ -4,6 +4,8 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { QueryResult, ArgoFloat } from "@/lib/types";
 import TSProfileChart from "../charts/TSProfileChart";
+import MarkdownRenderer from "./MarkdownRenderer";
+import { useTypewriter } from "./useTypewriter";
 import {
   saveQuery,
   deleteSavedQuery,
@@ -33,24 +35,43 @@ import {
   BookmarkCheck,
   BarChart3,
   Check,
+  Copy,
+  RotateCcw,
 } from "lucide-react";
 
 interface FloatChatMessageProps {
   result: QueryResult;
   onSelectFloat: (argoFloat: any) => void;
   onOpenEvidence: (argoFloat: any) => void;
+  onRegenerate?: (queryText: string) => void;
+  isNew?: boolean;
+  onTypewriterUpdate?: () => void;
 }
 
 export default function FloatChatMessage({
   result,
   onSelectFloat,
   onOpenEvidence,
+  onRegenerate,
+  isNew = false,
+  onTypewriterUpdate,
 }: FloatChatMessageProps) {
   const [showUnderstood, setShowUnderstood] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isVisSaved, setIsVisSaved] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+
   const primaryFloat = result.matchedFloats?.[0];
   const nlResponse = result.nlResponse;
+
+  const rawSummary = result.summary || "";
+  const { displayedText, isTyping } = useTypewriter(rawSummary, 12, isNew);
+
+  useEffect(() => {
+    if (isTyping && onTypewriterUpdate) {
+      onTypewriterUpdate();
+    }
+  }, [displayedText, isTyping, onTypewriterUpdate]);
 
   useEffect(() => {
     const updateSavedState = () => {
@@ -67,9 +88,16 @@ export default function FloatChatMessage({
     }
   }, [result.queryText, primaryFloat]);
 
+  const handleCopyText = () => {
+    if (typeof window === "undefined") return;
+    const textToCopy = result.summary || result.nlResponse?.conversational_response || "";
+    navigator.clipboard.writeText(textToCopy);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
   const handleToggleSaveQuery = () => {
     if (isSaved) {
-      // Find and delete
       const savedList = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("floatchat_saved_queries") || "[]") : [];
       const item = savedList.find((q: any) => q.queryText.trim().toLowerCase() === result.queryText.trim().toLowerCase());
       if (item) {
@@ -114,10 +142,69 @@ export default function FloatChatMessage({
     result.isClarification ||
     nlResponse?.status === "clarification_needed";
 
+  // Action Buttons Bar
+  const renderActionButtons = () => (
+    <div className="flex items-center gap-1.5 opacity-80 hover:opacity-100 transition-opacity">
+      {/* Copy Button */}
+      <button
+        onClick={handleCopyText}
+        title="Copy response text"
+        className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[#061c38]/60 hover:bg-[#0a2850] border border-cyan-500/20 text-[11px] text-slate-300 hover:text-white transition-colors"
+      >
+        {isCopied ? (
+          <>
+            <Check className="w-3 h-3 text-emerald-400" />
+            <span className="text-emerald-300">Copied</span>
+          </>
+        ) : (
+          <>
+            <Copy className="w-3 h-3 text-cyan-400" />
+            <span>Copy</span>
+          </>
+        )}
+      </button>
+
+      {/* Regenerate Button */}
+      {onRegenerate && (
+        <button
+          onClick={() => onRegenerate(result.queryText)}
+          title="Regenerate response"
+          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[#061c38]/60 hover:bg-[#0a2850] border border-cyan-500/20 text-[11px] text-slate-300 hover:text-white transition-colors"
+        >
+          <RotateCcw className="w-3 h-3 text-cyan-400" />
+          <span>Regenerate</span>
+        </button>
+      )}
+
+      {/* Bookmark / Save Query */}
+      <button
+        onClick={handleToggleSaveQuery}
+        title={isSaved ? "Saved" : "Save Query"}
+        className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] transition-all ${
+          isSaved
+            ? "bg-cyan-500/25 border-cyan-400 text-cyan-200"
+            : "bg-[#061c38]/60 hover:bg-[#0a2850] border-cyan-500/20 text-slate-300 hover:text-white"
+        }`}
+      >
+        {isSaved ? (
+          <>
+            <BookmarkCheck className="w-3 h-3 text-cyan-300" />
+            <span>Saved</span>
+          </>
+        ) : (
+          <>
+            <Bookmark className="w-3 h-3 text-cyan-400" />
+            <span>Save</span>
+          </>
+        )}
+      </button>
+    </div>
+  );
+
   // Conversational response rendering
   if (isConversational) {
     return (
-      <div className="flex items-start gap-3 my-4 pr-4 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
+      <div className="flex items-start gap-3 my-4 pr-2 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
         <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 p-[1.5px] shrink-0 shadow-[0_0_15px_rgba(6,182,212,0.4)]">
           <div className="w-full h-full bg-[#051428] rounded-[9px] flex items-center justify-center">
             <svg
@@ -135,16 +222,22 @@ export default function FloatChatMessage({
           </div>
         </div>
 
-        <div className="flex-1 min-w-0 space-y-3.5">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-white tracking-tight">FloatChat</span>
-            <span className="text-[10px] text-cyan-400/80 font-mono-sci px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/20">
-              Assistant
-            </span>
+        <div className="flex-1 min-w-0 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-white tracking-tight">FloatChat</span>
+              <span className="text-[10px] text-cyan-400/80 font-mono-sci px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/20">
+                Assistant
+              </span>
+            </div>
+            {renderActionButtons()}
           </div>
 
-          <div className="text-sm font-medium text-slate-100 leading-relaxed bg-[#051833]/60 p-3.5 rounded-xl border border-cyan-500/15">
-            {result.summary}
+          <div className="bg-[#051833]/60 p-4 rounded-xl border border-cyan-500/15">
+            <MarkdownRenderer content={displayedText} />
+            {isTyping && (
+              <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse align-middle" />
+            )}
           </div>
         </div>
       </div>
@@ -154,7 +247,7 @@ export default function FloatChatMessage({
   // Clarification requested rendering
   if (isClarification) {
     return (
-      <div className="flex items-start gap-3 my-4 pr-4 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
+      <div className="flex items-start gap-3 my-4 pr-2 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
         <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 p-[1.5px] shrink-0 shadow-[0_0_15px_rgba(6,182,212,0.4)]">
           <div className="w-full h-full bg-[#051428] rounded-[9px] flex items-center justify-center">
             <svg
@@ -172,16 +265,22 @@ export default function FloatChatMessage({
           </div>
         </div>
 
-        <div className="flex-1 min-w-0 space-y-3.5">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-white tracking-tight">FloatChat</span>
-            <span className="text-[10px] text-amber-300/90 font-mono-sci px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-500/30">
-              Clarification Requested
-            </span>
+        <div className="flex-1 min-w-0 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-white tracking-tight">FloatChat</span>
+              <span className="text-[10px] text-amber-300/90 font-mono-sci px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-500/30">
+                Clarification Requested
+              </span>
+            </div>
+            {renderActionButtons()}
           </div>
 
-          <div className="text-sm font-medium text-amber-100 leading-relaxed bg-amber-950/30 p-3.5 rounded-xl border border-amber-500/30">
-            {result.summary}
+          <div className="bg-amber-950/30 p-4 rounded-xl border border-amber-500/30">
+            <MarkdownRenderer content={displayedText} className="text-amber-100" />
+            {isTyping && (
+              <span className="inline-block w-2 h-4 ml-1 bg-amber-400 animate-pulse align-middle" />
+            )}
           </div>
         </div>
       </div>
@@ -209,7 +308,7 @@ export default function FloatChatMessage({
   const hasChartData = tempProfile.length > 0 || salProfile.length > 0;
 
   return (
-    <div className="flex items-start gap-3 my-4 pr-4 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
+    <div className="flex items-start gap-3 my-4 pr-2 sm:pr-8 max-w-4xl mx-auto w-full select-text animate-in fade-in slide-in-from-bottom-2 duration-200">
       {/* AI Bot Avatar */}
       <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 p-[1.5px] shrink-0 shadow-[0_0_15px_rgba(6,182,212,0.4)]">
         <div className="w-full h-full bg-[#051428] rounded-[9px] flex items-center justify-center">
@@ -240,28 +339,7 @@ export default function FloatChatMessage({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Bookmark / Save Query Button */}
-            <button
-              onClick={handleToggleSaveQuery}
-              title={isSaved ? "Saved to Saved Queries" : "Save this query"}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all ${
-                isSaved
-                  ? "bg-cyan-500/25 border border-cyan-400 text-cyan-200 shadow-[0_0_10px_rgba(34,211,238,0.3)]"
-                  : "bg-[#061c38]/80 hover:bg-[#0a2850] border border-cyan-500/25 text-slate-300 hover:text-white"
-              }`}
-            >
-              {isSaved ? (
-                <>
-                  <BookmarkCheck className="w-3 h-3 text-cyan-300" />
-                  <span>Saved</span>
-                </>
-              ) : (
-                <>
-                  <Bookmark className="w-3 h-3 text-cyan-400" />
-                  <span>Save Query</span>
-                </>
-              )}
-            </button>
+            {renderActionButtons()}
 
             {/* Understood Query Toggle */}
             <button
@@ -303,9 +381,12 @@ export default function FloatChatMessage({
           </div>
         )}
 
-        {/* 1. Real Summary Text */}
-        <div className="text-sm font-medium text-slate-100 leading-relaxed bg-[#051833]/60 p-3.5 rounded-xl border border-cyan-500/15">
-          {result.summary}
+        {/* 1. Real Summary Text with Markdown */}
+        <div className="bg-[#051833]/60 p-4 rounded-xl border border-cyan-500/15">
+          <MarkdownRenderer content={displayedText} />
+          {isTyping && (
+            <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse align-middle" />
+          )}
         </div>
 
         {/* Anomaly Badge if Present */}
@@ -449,4 +530,3 @@ export default function FloatChatMessage({
     </div>
   );
 }
-
